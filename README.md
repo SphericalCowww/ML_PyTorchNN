@@ -1,6 +1,7 @@
 # PyTorch Neural Network
 
 ## Keywords:
+- understanding CNN diagram dimensions: thickness comes from the number of different filters/kernels; no reduction in layer width*height due to zero-padding. The layer width*height only reduces because of max pooling (<a href="https://stackoverflow.com/questions/65554032/understanding-convolutional-layers-shapes">stackoverflow</a>)
 - bias-variance-tradeoff versus precision-recall-tradeoff (<a href="https://stackoverflow.com/questions/65554032/understanding-convolutional-layers-shapes">stackoverflow</a>)
 
 ## References:
