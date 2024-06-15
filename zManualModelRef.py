@@ -37,6 +37,7 @@ def main():
             print(f'epoch {epochIter}: w = {w:.3f}, loss = {lossVal:.8f}')
             print('  y_hat =', y_hat.detach().numpy())
     print(f'predict(x_test) = {forwardFunc(w, x_test)}')
+    print('done')
 
 if __name__ == '__main__': main()
 
