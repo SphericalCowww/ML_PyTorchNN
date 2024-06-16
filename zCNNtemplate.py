@@ -21,19 +21,28 @@ class modelObj(torch.nn.Module):
         super().__init__()
         self.layerSquence = torch.nn.Sequential(\
     #############################################################
-            torch.nn.Flatten(),
-            torch.nn.Linear(inputSize, 100),\
+            torch.nn.Conv2d(3, 10, 5),\
             torch.nn.ReLU(),\
-            torch.nn.Linear(100, classN))
+            torch.nn.MaxPool2d(2, stride=2),\
+            torch.nn.Conv2d(10, 16, 3),\
+            torch.nn.ReLU(),\
+            torch.nn.MaxPool2d(2, stride=2),\
+            torch.nn.Flatten(),\
+            torch.nn.Linear(16*6*6, 100),\
+            torch.nn.ReLU(),\
+            torch.nn.Linear(100, 40),\
+            torch.nn.ReLU(),\
+            torch.nn.Linear(40, classN))
             #torch.nn.ReLU())
+    # NOTE: input size of the Linear layer need to be specifically evaluated
     # NOTE: the last ReLU activation is NOT needed because it's already included in torch.nn.CrossEntropyLoss()
     #############################################################
     def forward(self, x): return self.layerSquence(x)
 
 def main():
-    deviceName = 'cpu'#GPUNAME
-    epochN     = 23
-    batchSize  = 100
+    deviceName = GPUNAME
+    epochN     = 20
+    batchSize  = 25
     learnRate  = 0.001
     randomSeed = 11 
 
@@ -42,22 +51,47 @@ def main():
 
     verbosity   = 2
     printBatchN = 100
-    checkpointLoadPath    = 'zStandardModelTemplate/model1.pth'
-    checkpointSavePath    = 'zStandardModelTemplate/model1.pth'
-    tensorboardWriterPath = 'zStandardModelTemplate/model1'
-    pathlib.Path('zStandardModelTemplate').mkdir(parents=True, exist_ok=True)
+    checkpointLoadPath    = 'zCNNtemplate/model1.pth'
+    checkpointSavePath    = 'zCNNtemplate/model1.pth'
+    tensorboardWriterPath = 'zCNNtemplate/model1'
+    pathlib.Path('zCNNtemplate').mkdir(parents=True, exist_ok=True)
     #############################################################
     ### loading data
-    torch.manual_seed(randomSeed) 
-    trainData = torchvision.datasets.MNIST(root='./dataset', train=True,\
-                                           transform=torchvision.transforms.ToTensor())#, download=True)
-    testData  = torchvision.datasets.MNIST(root='./dataset', train=False,\
-                                           transform=torchvision.transforms.ToTensor())
+    torch.manual_seed(randomSeed)
+    # NOTE: transform to normalize PILImage range of [0, 1] to [-1, 1]
+    transformObj = torchvision.transforms.Compose([torchvision.transforms.ToTensor(),\
+                                                   torchvision.transforms.Normalize([0.5, 0.5, 0.5],\
+                                                                                    [0.5, 0.5, 0.5])])
+    trainData = torchvision.datasets.CIFAR10(root='./dataset', train=True,  transform=transformObj)
+    testData  = torchvision.datasets.CIFAR10(root='./dataset', train=False, transform=transformObj)
+    classes = ['plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
     trainLoader = torch.utils.data.DataLoader(dataset=trainData, batch_size=batchSize, shuffle=True)
     testLoader  = torch.utils.data.DataLoader(dataset=testData,  batch_size=batchSize, shuffle=False)
     dataShape   = trainLoader.dataset.data.shape
     inputSize = dataShape[1]*dataShape[2]
     classN    = len(np.unique(trainLoader.dataset.targets))
+    if verbosity >= 1: 
+        print('dataShape:', dataShape)
+        print('classN:', classN)
+    ### for calculating required
+    ''' 
+    # check CNN padding and strides
+    # Conv2d(input dim (color dim), output size, kernel size)
+    # MaxPool2d(kernel size)
+    for batchIdx, dataIter in enumerate(trainLoader):
+        prop = dataIter[0]
+        print(prop.shape)
+        prop = torch.nn.Conv2d(3, 10, 5)(prop)
+        print(prop.shape)
+        prop = torch.nn.MaxPool2d(2, stride=2)(prop)
+        print(prop.shape)
+        prop = torch.nn.Conv2d(10, 16, 3)(prop)
+        print(prop.shape)
+        prop = torch.nn.MaxPool2d(2, stride=2)(prop)
+        print(prop.shape)
+        break
+    sys.exit(0)
+    '''
     ### training
     if verbosity >= 1: print('using device:', deviceName)
     device    = torch.device(deviceName)       
