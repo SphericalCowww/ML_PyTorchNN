@@ -11,7 +11,9 @@ import pickle
 from tqdm import tqdm
 import torch
 import torchvision
-
+GPUNAME = None
+if torch.cuda.is_available()         == True: GPUNAME = 'cuda'
+if torch.backends.mps.is_available() == True: GPUNAME = 'mps'
 ###############################################################################################################
 class modelObj(torch.nn.Module):
     def __init__(self, inputSize, classN):
@@ -26,7 +28,7 @@ class modelObj(torch.nn.Module):
     def forward(self, x): return self.layerSquence(x)
 
 def main():
-    device = 'cpu'#torch.device(('cuda' if torch.cuda.is_available else 'cpu'))
+    device = torch.device('cpu')  #GPUNAME)
     epochN     = 3
     batchSize  = 100
     learnRate  = 0.001

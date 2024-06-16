@@ -12,6 +12,9 @@ from tqdm import tqdm
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter   #tensorboard --logdir ...
+GPUNAME = None
+if torch.cuda.is_available()         == True: GPUNAME = 'cuda'
+if torch.backends.mps.is_available() == True: GPUNAME = 'mps'
 ###############################################################################################################
 class modelObj(torch.nn.Module):
     def __init__(self, inputSize, classN):
@@ -26,8 +29,8 @@ class modelObj(torch.nn.Module):
     def forward(self, x): return self.layerSquence(x)
 
 def main():
-    device = 'cpu'#torch.device(('cuda' if torch.cuda.is_available else 'cpu'))
-    epochN     = 21
+    deviceName = 'cpu'#GPUNAME
+    epochN     = 23
     batchSize  = 100
     learnRate  = 0.001
     randomSeed = 11 
@@ -37,9 +40,9 @@ def main():
 
     verbosity   = 2
     printBatchN = 100
-    checkpointLoadPath = 'zStandardModelTemplate/model1.pth'
-    checkpointSavePath = 'zStandardModelTemplate/model1.pth'
-    tensorboardWriter = SummaryWriter('zStandardModelTemplate/model1')
+    checkpointLoadPath    = 'zStandardModelTemplate/model1.pth'
+    checkpointSavePath    = 'zStandardModelTemplate/model1.pth'
+    tensorboardWriterPath = 'zStandardModelTemplate/model1'
     #############################################################
     ### loading data
     torch.manual_seed(randomSeed) 
@@ -53,6 +56,8 @@ def main():
     inputSize = dataShape[1]*dataShape[2]
     classN    = len(np.unique(trainLoader.dataset.targets))
     ### training
+    if verbosity >= 1: print('using device:', deviceName)
+    device    = torch.device(deviceName)       
     model     = modelObj(inputSize, classN)
     optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
     checkpoint = {'epoch': -1}
@@ -69,9 +74,8 @@ def main():
     else: 
         model     = modelObj(inputSize, classN)
         optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
-    if tensorboardWriter is not None:
-        tensorboardWriter.add_graph(model)
-        tensorboardWriter.close()
+    model.to(device)
+    optimizer_to(optimizer, device)
     batchTotalN = len(trainLoader)
     for epoch in range(checkpoint['epoch']+1, epochN):
         correctN = 0
@@ -91,7 +95,7 @@ def main():
             lossTot += loss.item()
             predictions = torch.max(outputs, 1)[1]
             sampleN  += labels.shape[0]
-            correctN += np.sum(np.array((predictions == labels))) 
+            correctN += (predictions == labels).sum().item()  
             if (verbosity >= 1) and ((batchIdx+1)%printBatchN == 0):
                 print('epoch:',  str(epoch+1)+'/'+str(epochN)+',',\
                       'step:',   str(batchIdx+1)+'/'+str(batchTotalN)+',',\
@@ -103,7 +107,8 @@ def main():
         if checkpointSavePath is not None:
             torch.save(checkpoint, checkpointSavePath)
             if verbosity >= 1: print('  saving:', checkpointSavePath)
-        if tensorboardWriter is not None:
+        if tensorboardWriterPath is not None:
+            tensorboardWriter = SummaryWriter(tensorboardWriterPath)
             tensorboardWriter.add_scalar('loss',     lossTot,  epoch)
             tensorboardWriter.add_scalar('accuracy', accuracy, epoch) 
             tensorboardWriter.close()
@@ -117,9 +122,24 @@ def main():
             outputs     = model(samples)
             predictions = torch.max(outputs, 1)[1] 
             sampleN  += labels.shape[0]
-            correctN += np.sum(np.array((predictions == labels))) 
+            correctN += (predictions == labels).sum().item() 
     accuracy = 100.0*(correctN/sampleN)
     if verbosity >= 1: print('accuracy = ', accuracy, '%\ndone')
+###############################################################################################################
+#https://discuss.pytorch.org/t/moving-optimizer-from-cpu-to-gpu/96068/2
+def optimizer_to(optim, device):
+    for param in optim.state.values():
+        # Not sure there are any global tensors in the state dict
+        if isinstance(param, torch.Tensor):
+            param.data = param.data.to(device)
+            if param._grad is not None:
+                param._grad.data = param._grad.data.to(device)
+        elif isinstance(param, dict):
+            for subparam in param.values():
+                if isinstance(subparam, torch.Tensor):
+                    subparam.data = subparam.data.to(device)
+                    if subparam._grad is not None:
+                        subparam._grad.data = subparam._grad.data.to(device)
 ###############################################################################################################
 if __name__ == '__main__': main()
 
