@@ -16,48 +16,60 @@ GPUNAME = None
 if torch.cuda.is_available()         == True: GPUNAME = 'cuda'
 if torch.backends.mps.is_available() == True: GPUNAME = 'mps'
 ###############################################################################################################
-class modelObj(torch.nn.Module):
-    def __init__(self, inputSize, classN):
-        super().__init__()
-        self.layerSquence = torch.nn.Sequential(\
-    #############################################################
-            torch.nn.Flatten(),
-            torch.nn.Linear(inputSize, 100),\
-            torch.nn.ReLU(),\
-            torch.nn.Linear(100, classN))
-            #torch.nn.ReLU())
-    # NOTE: the last ReLU activation is NOT needed because it's already included in torch.nn.CrossEntropyLoss()
-    #############################################################
-    def forward(self, x): return self.layerSquence(x)
-
+def modelObj(inputSize, classN):    # note: this is not a class
+    model = torchvision.models.resnet18(pretrained=True)
+    for par in model.parameters(): par.requires_grad = False    #fix the weights of all layers
+    features = model.fc.in_features
+    model.fc = torch.nn.Linear(features, classN)    #automatically set this layer's par.requires_grad = True
+    return model
 def main():
-    deviceName = 'cpu'#GPUNAME
-    epochN     = 23
+    deviceName = GPUNAME
+    epochN     = 12
     batchSize  = 100
     learnRate  = 0.001
     randomSeed = 11 
 
     lossFunction = torch.nn.CrossEntropyLoss()
     optimizerObj = lambda inputPars: torch.optim.Adam(inputPars, lr=learnRate)
+    #schedulerObj = lambda inputOpt, lastEpoch:\ 
+    #    torch.optim.lr_scheduler.StepLR(inputOpt, last_epoch=lastEpoch, step_size=2, gamma=0.5)
+    schedulerObj = lambda inputOpt, lastEpoch:\
+        torch.optim.lr_scheduler.LinearLR(inputOpt, last_epoch=lastEpoch, start_factor=1.0, end_factor=0.5,\
+                                          total_iters=20)
 
     verbosity   = 2
     printBatchN = 100
-    checkpointLoadPath    = 'zStandardModelTemplate/model1.pth'
-    checkpointSavePath    = 'zStandardModelTemplate/model1.pth'
-    tensorboardWriterPath = 'zStandardModelTemplate/model1'
-    pathlib.Path('zStandardModelTemplate').mkdir(parents=True, exist_ok=True)
+    checkpointLoadPath    = None#'zTransferModelTemplate/model1.pth'
+    checkpointSavePath    = 'zTransferModelTemplate/model1.pth'
+    tensorboardWriterPath = 'zTransferModelTemplate/model1'
+    pathlib.Path('zTransferModelTemplate').mkdir(parents=True, exist_ok=True)
     #############################################################
     ### loading data
-    torch.manual_seed(randomSeed) 
-    trainData = torchvision.datasets.MNIST(root='./dataset', train=True,\
-                                           transform=torchvision.transforms.ToTensor())#, download=True)
-    testData  = torchvision.datasets.MNIST(root='./dataset', train=False,\
-                                           transform=torchvision.transforms.ToTensor())
+    torch.manual_seed(randomSeed)
+    dataDir   = './dataset/catDog/'
+    imageSize = 100
+    dataTransformers = {'train': torchvision.transforms.Compose([\
+                                    torchvision.transforms.RandomResizedCrop(imageSize),\
+                                    torchvision.transforms.RandomHorizontalFlip(),\
+                                    torchvision.transforms.ToTensor(),\
+                                    torchvision.transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]),
+                        'test':  torchvision.transforms.Compose([\
+                                    torchvision.transforms.RandomResizedCrop(imageSize),\
+                                    torchvision.transforms.CenterCrop(imageSize),\
+                                    torchvision.transforms.ToTensor(),\
+                                    torchvision.transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]),}    
+
+    trainData = torchvision.datasets.ImageFolder(dataDir+'train', transform=dataTransformers['train'])
+    testData  = torchvision.datasets.ImageFolder(dataDir+'test',  transform=dataTransformers['test'])
+    classes = ['cat', 'dog']
     trainLoader = torch.utils.data.DataLoader(dataset=trainData, batch_size=batchSize, shuffle=True)
     testLoader  = torch.utils.data.DataLoader(dataset=testData,  batch_size=batchSize, shuffle=False)
-    dataShape   = trainLoader.dataset.data.shape
+    dataShape = [len(trainData), trainData[0][0].shape[0], trainData[0][0].shape[1]]
     inputSize = dataShape[1]*dataShape[2]
-    classN    = len(np.unique(trainLoader.dataset.targets))
+    classN    = len(classes)
+    if verbosity >= 1:
+        print('dataShape:', dataShape)
+        print('classN   :', classN)
     ### training
     if verbosity >= 1: print('using device:', deviceName)
     device    = torch.device(deviceName)       
@@ -79,6 +91,8 @@ def main():
         optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
     model.to(device)
     optimizer_to(optimizer, device)
+    if schedulerObj is not None: 
+        scheduler = schedulerObj(optimizer, -1 if (checkpoint['epoch'] == -1) else checkpoint['epoch'] + 1)
     batchTotalN = len(trainLoader)
     for epoch in range(checkpoint['epoch']+1, epochN):
         correctN = 0
@@ -103,11 +117,17 @@ def main():
                 print('epoch:',  str(epoch+1)+'/'+str(epochN)+',',\
                       'step:',   str(batchIdx+1)+'/'+str(batchTotalN)+',',\
                       'loss =', loss.item())
+        scheduler.step()
         accuracy = 100.0*(correctN/sampleN)
         checkpoint['epoch']           = epoch
         checkpoint['model_state']     = model.state_dict()
         checkpoint['optimizer_state'] = optimizer.state_dict()
-        if verbosity >= 1: print('accuracy = ', accuracy)
+        if verbosity >= 1: print('  accuracy = ', accuracy)
+        if schedulerObj is not None:
+            scheduler.step()
+            if verbosity >= 2:
+                optParDict = optimizer.state_dict()['param_groups'][0]
+                for key in optParDict: print('   ', key, ':', optParDict[key])
         if checkpointSavePath is not None:
             torch.save(checkpoint, checkpointSavePath)
             if verbosity >= 1: print('  saving:', checkpointSavePath)

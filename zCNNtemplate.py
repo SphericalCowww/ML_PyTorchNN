@@ -72,7 +72,7 @@ def main():
     classN    = len(np.unique(trainLoader.dataset.targets))
     if verbosity >= 1: 
         print('dataShape:', dataShape)
-        print('classN:', classN)
+        print('classN   :', classN)
     ### for calculating required
     ''' 
     # check CNN padding and strides
@@ -118,7 +118,7 @@ def main():
         correctN = 0
         sampleN  = 0
         lossTot  = 0
-        for batchIdx, dataIter in enumerate(trainLoader):
+        for batchIdx, dataIter in enumerate(tqdm(trainLoader)):
             samples = dataIter[0].to(device)
             labels  = dataIter[1].to(device)
             #forward
@@ -141,7 +141,7 @@ def main():
         checkpoint['epoch']           = epoch
         checkpoint['model_state']     = model.state_dict()
         checkpoint['optimizer_state'] = optimizer.state_dict()
-        if verbosity >= 1: print('accuracy = ', accuracy)
+        if verbosity >= 1: print('  accuracy = ', accuracy)
         if checkpointSavePath is not None:
             torch.save(checkpoint, checkpointSavePath)
             if verbosity >= 1: print('  saving:', checkpointSavePath)
@@ -162,7 +162,7 @@ def main():
             sampleN  += labels.shape[0]
             correctN += (predictions == labels).sum().item() 
     accuracy = 100.0*(correctN/sampleN)
-    if verbosity >= 1: print('accuracy = ', accuracy, '%\ndone')
+    if verbosity >= 1: print('  accuracy = ', accuracy, '%\ndone')
 ###############################################################################################################
 #https://discuss.pytorch.org/t/moving-optimizer-from-cpu-to-gpu/96068/2
 def optimizer_to(optim, device):
