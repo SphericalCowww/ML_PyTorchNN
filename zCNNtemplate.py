@@ -1,4 +1,9 @@
 import os, sys, pathlib, time, re, glob, math
+import warnings
+def warning_on_one_line(message, category, filename, lineno, file=None, line=None):
+    return '%s: %s: %s: %s\n' % (filename, lineno, category.__name__, message)
+warnings.formatwarning = warning_on_one_line
+warnings.filterwarnings('ignore', category=DeprecationWarning)
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
@@ -40,7 +45,7 @@ class modelObj(torch.nn.Module):
     def forward(self, x): return self.layerSquence(x)
 
 def main():
-    deviceName = GPUNAME
+    deviceName = 'cpu'#GPUNAME
     epochN     = 20
     batchSize  = 25
     learnRate  = 0.001
@@ -48,13 +53,17 @@ def main():
 
     lossFunction = torch.nn.CrossEntropyLoss()
     optimizerObj = lambda inputPars: torch.optim.Adam(inputPars, lr=learnRate)
-
+    schedulerObj = lambda inputOpt, lastEpoch:\
+        torch.optim.lr_scheduler.StepLR(inputOpt, last_epoch=lastEpoch, step_size=2, gamma=0.8)
+ 
     verbosity   = 2
-    printBatchN = 100
+    printBatchN = 1000
     checkpointLoadPath    = 'zCNNtemplate/model1.pth'
     checkpointSavePath    = 'zCNNtemplate/model1.pth'
     tensorboardWriterPath = 'zCNNtemplate/model1'
     pathlib.Path('zCNNtemplate').mkdir(parents=True, exist_ok=True)
+    plotTestBatchN          = 10
+    plotTestSampleNperBatch = 10
     #############################################################
     ### loading data
     torch.manual_seed(randomSeed)
@@ -113,6 +122,8 @@ def main():
         optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
     model.to(device)
     optimizer_to(optimizer, device)
+    if schedulerObj is not None:
+        scheduler = schedulerObj(optimizer, -1 if (checkpoint['epoch'] == -1) else checkpoint['epoch'] + 1)
     batchTotalN = len(trainLoader)
     for epoch in range(checkpoint['epoch']+1, epochN):
         correctN = 0
@@ -142,6 +153,11 @@ def main():
         checkpoint['model_state']     = model.state_dict()
         checkpoint['optimizer_state'] = optimizer.state_dict()
         if verbosity >= 1: print('  accuracy = ', accuracy)
+        if schedulerObj is not None:
+            scheduler.step()
+            if verbosity >= 2:
+                optParDict = optimizer.state_dict()['param_groups'][0]
+                for key in optParDict: print('   ', key, ':', optParDict[key])
         if checkpointSavePath is not None:
             torch.save(checkpoint, checkpointSavePath)
             if verbosity >= 1: print('  saving:', checkpointSavePath)
@@ -150,19 +166,46 @@ def main():
             tensorboardWriter.add_scalar('loss',     lossTot,  epoch)
             tensorboardWriter.add_scalar('accuracy', accuracy, epoch) 
             tensorboardWriter.close()
-    ### testing
+        ### testing; independent from training
+        correctN, sampleN = 0, 0
+        with torch.no_grad():
+            for batchIdx, dataIter in enumerate(testLoader):
+                samples     = dataIter[0].to(device)
+                labels      = dataIter[1].to(device)
+                outputs     = model(samples)
+                predictions = torch.max(outputs, 1)[1] 
+                sampleN  += labels.shape[0]
+                correctN += (predictions == labels).sum().item() 
+        accuracy = 100.0*(correctN/sampleN)
+        if verbosity >= 1: print('  test validation accuracy = ', accuracy, '%\ndone')
+    correctN, sampleN = 0, 0
     with torch.no_grad():
-        correctN = 0
-        sampleN  = 0
+        figureDir = tensorboardWriterPath + '_testPlots'
+        pathlib.Path(figureDir).mkdir(parents=True, exist_ok=True)
         for batchIdx, dataIter in enumerate(testLoader):
             samples     = dataIter[0].to(device)
             labels      = dataIter[1].to(device)
             outputs     = model(samples)
-            predictions = torch.max(outputs, 1)[1] 
+            predictions = torch.max(outputs, 1)[1]
             sampleN  += labels.shape[0]
-            correctN += (predictions == labels).sum().item() 
+            correctN += (predictions == labels).sum().item()
+            if deviceName != 'cpu':
+                warnings.warn('\nmain(): deviceName needs to be \'cpu\' to generate test plots', Warning)
+            if (deviceName == 'cpu') and (batchIdx < plotTestBatchN):
+                for sampleIdx in range(len(samples)): 
+                    if plotTestSampleNperBatch <= sampleIdx: break
+                    figureName = figureDir + '/testPlot_batch' + str(batchIdx) +'_sample'+str(sampleIdx)+'.png'
+                    labelName      = classes[labels[sampleIdx]]
+                    predictionName = classes[predictions[sampleIdx]]
+                    plt.imshow(samples[sampleIdx][0], cmap='gray')
+                    plt.title('label: '+labelName+', prediction: '+predictionName)
+                    plt.axis('off')
+                    plt.tight_layout()
+                    plt.savefig(figureName)
+                    if verbosity >= 1: print('  saving:', figureName)
+                    plt.clf()
     accuracy = 100.0*(correctN/sampleN)
-    if verbosity >= 1: print('  accuracy = ', accuracy, '%\ndone')
+    if verbosity >= 1: print('  final test validation accuracy = ', accuracy, '%\ndone')
 ###############################################################################################################
 #https://discuss.pytorch.org/t/moving-optimizer-from-cpu-to-gpu/96068/2
 def optimizer_to(optim, device):

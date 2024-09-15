@@ -1,4 +1,9 @@
 import os, sys, pathlib, time, re, glob, math
+import warnings
+def warning_on_one_line(message, category, filename, lineno, file=None, line=None):
+    return '%s: %s: %s: %s\n' % (filename, lineno, category.__name__, message)
+warnings.formatwarning = warning_on_one_line
+warnings.filterwarnings('ignore', category=DeprecationWarning)
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
@@ -18,13 +23,13 @@ if torch.backends.mps.is_available() == True: GPUNAME = 'mps'
 ###############################################################################################################
 def modelObj(inputSize, classN):    # note: this is not a class
     model = torchvision.models.resnet18(pretrained=True)
-    for par in model.parameters(): par.requires_grad = False    #fix the weights of all layers
+    #for par in model.parameters(): par.requires_grad = False    #fix the weights of all layers
     features = model.fc.in_features
     model.fc = torch.nn.Linear(features, classN)    #automatically set this layer's par.requires_grad = True
     return model
 def main():
     deviceName = GPUNAME
-    epochN     = 12
+    epochN     = 1
     batchSize  = 100
     learnRate  = 0.001
     randomSeed = 11 
@@ -39,15 +44,17 @@ def main():
 
     verbosity   = 2
     printBatchN = 100
-    checkpointLoadPath    = None#'zTransferModelTemplate/model1.pth'
+    checkpointLoadPath    = 'zTransferModelTemplate/model1.pth'
     checkpointSavePath    = 'zTransferModelTemplate/model1.pth'
     tensorboardWriterPath = 'zTransferModelTemplate/model1'
     pathlib.Path('zTransferModelTemplate').mkdir(parents=True, exist_ok=True)
+    plotTestBatchN          = 10
+    plotTestSampleNperBatch = 10
     #############################################################
     ### loading data
     torch.manual_seed(randomSeed)
     dataDir   = './dataset/catDog/'
-    imageSize = 100
+    imageSize = 224
     dataTransformers = {'train': torchvision.transforms.Compose([\
                                     torchvision.transforms.RandomResizedCrop(imageSize),\
                                     torchvision.transforms.RandomHorizontalFlip(),\
@@ -55,7 +62,6 @@ def main():
                                     torchvision.transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]),
                         'test':  torchvision.transforms.Compose([\
                                     torchvision.transforms.RandomResizedCrop(imageSize),\
-                                    torchvision.transforms.CenterCrop(imageSize),\
                                     torchvision.transforms.ToTensor(),\
                                     torchvision.transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]),}    
 
@@ -117,7 +123,6 @@ def main():
                 print('epoch:',  str(epoch+1)+'/'+str(epochN)+',',\
                       'step:',   str(batchIdx+1)+'/'+str(batchTotalN)+',',\
                       'loss =', loss.item())
-        scheduler.step()
         accuracy = 100.0*(correctN/sampleN)
         checkpoint['epoch']           = epoch
         checkpoint['model_state']     = model.state_dict()
@@ -136,19 +141,46 @@ def main():
             tensorboardWriter.add_scalar('loss',     lossTot,  epoch)
             tensorboardWriter.add_scalar('accuracy', accuracy, epoch) 
             tensorboardWriter.close()
-    ### testing
+        ### testing; independent from training
+        correctN, sampleN = 0, 0
+        with torch.no_grad():
+            for batchIdx, dataIter in enumerate(testLoader):
+                samples     = dataIter[0].to(device)
+                labels      = dataIter[1].to(device)
+                outputs     = model(samples)
+                predictions = torch.max(outputs, 1)[1] 
+                sampleN  += labels.shape[0]
+                correctN += (predictions == labels).sum().item() 
+        accuracy = 100.0*(correctN/sampleN)
+        if verbosity >= 1: print('  test validation accuracy = ', accuracy, '%\ndone')
+    correctN, sampleN = 0, 0
     with torch.no_grad():
-        correctN = 0
-        sampleN  = 0
+        figureDir = tensorboardWriterPath + '_testPlots'
+        pathlib.Path(figureDir).mkdir(parents=True, exist_ok=True)
         for batchIdx, dataIter in enumerate(testLoader):
             samples     = dataIter[0].to(device)
             labels      = dataIter[1].to(device)
             outputs     = model(samples)
-            predictions = torch.max(outputs, 1)[1] 
+            predictions = torch.max(outputs, 1)[1]
             sampleN  += labels.shape[0]
-            correctN += (predictions == labels).sum().item() 
+            correctN += (predictions == labels).sum().item()
+            if deviceName != 'cpu':
+                warnings.warn('\nmain(): deviceName needs to be \'cpu\' to generate test plots', Warning)
+            if (deviceName == 'cpu') and (batchIdx < plotTestBatchN):
+                for sampleIdx in range(len(samples)): 
+                    if plotTestSampleNperBatch <= sampleIdx: break
+                    figureName = figureDir + '/testPlot_batch' + str(batchIdx) +'_sample'+str(sampleIdx)+'.png'
+                    labelName      = classes[labels[sampleIdx]]
+                    predictionName = classes[predictions[sampleIdx]]
+                    plt.imshow(samples[sampleIdx][0], cmap='gray')
+                    plt.title('label: '+labelName+', prediction: '+predictionName)
+                    plt.axis('off')
+                    plt.tight_layout()
+                    plt.savefig(figureName)
+                    if verbosity >= 1: print('  saving:', figureName)
+                    plt.clf()
     accuracy = 100.0*(correctN/sampleN)
-    if verbosity >= 1: print('accuracy = ', accuracy, '%\ndone')
+    if verbosity >= 1: print('  final test validation accuracy = ', accuracy, '%\ndone')
 ###############################################################################################################
 #https://discuss.pytorch.org/t/moving-optimizer-from-cpu-to-gpu/96068/2
 def optimizer_to(optim, device):
