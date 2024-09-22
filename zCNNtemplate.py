@@ -20,6 +20,13 @@ from torch.utils.tensorboard import SummaryWriter   #tensorboard --logdir ...
 GPUNAME = None
 if torch.cuda.is_available()         == True: GPUNAME = 'cuda'
 if torch.backends.mps.is_available() == True: GPUNAME = 'mps'
+# incorporated batch normalization: 
+#   datascienceweekly.org/tutorials/batchnorm2d-how-to-use-the-batchnorm2d-module-in-pytorch
+# incorporated dropout: 
+#   machinelearningmastery.com/using-dropout-regularization-in-pytorch-models/
+#   www.reddit.com/r/MachineLearning/comments/67gonq/d_batch_normalization_before_or_after_relu/
+# incorporated regularization: 
+#   stackoverflow.com/questions/42704283
 ###############################################################################################################
 class modelObj(torch.nn.Module):
     def __init__(self, inputSize, classN):
@@ -28,10 +35,16 @@ class modelObj(torch.nn.Module):
     #############################################################
             torch.nn.Conv2d(3, 10, 5),\
             torch.nn.ReLU(),\
+            torch.nn.BatchNorm2d(10, eps=1e-05, momentum=0.1, track_running_stats=True),\
             torch.nn.MaxPool2d(2, stride=2),\
+            torch.nn.Dropout(0.1),\
+
             torch.nn.Conv2d(10, 16, 3),\
             torch.nn.ReLU(),\
+            torch.nn.BatchNorm2d(16, eps=1e-05, momentum=0.1, track_running_stats=True),\
             torch.nn.MaxPool2d(2, stride=2),\
+            torch.nn.Dropout(0.1),\
+
             torch.nn.Flatten(),\
             torch.nn.Linear(16*6*6, 100),\
             torch.nn.ReLU(),\
@@ -46,13 +59,14 @@ class modelObj(torch.nn.Module):
 
 def main():
     deviceName = 'cpu'#GPUNAME
-    epochN     = 20
+    epochN     = 10
     batchSize  = 25
     learnRate  = 0.001
     randomSeed = 11 
 
     lossFunction = torch.nn.CrossEntropyLoss()
-    optimizerObj = lambda inputPars: torch.optim.Adam(inputPars, lr=learnRate)
+    #incorporate regularization: stackoverflow.com/questions/42704283
+    optimizerObj = lambda inputPars: torch.optim.Adam(inputPars, lr=learnRate, weight_decay=1E-5)
     schedulerObj = lambda inputOpt, lastEpoch:\
         torch.optim.lr_scheduler.StepLR(inputOpt, last_epoch=lastEpoch, step_size=2, gamma=0.8)
  
@@ -83,24 +97,24 @@ def main():
         print('dataShape:', dataShape)
         print('classN   :', classN)
     ### for calculating required
-    ''' 
+     
     # check CNN padding and strides
     # Conv2d(input dim (color dim), output size, kernel size)
     # MaxPool2d(kernel size)
-    for batchIdx, dataIter in enumerate(trainLoader):
-        prop = dataIter[0]
-        print(prop.shape)
-        prop = torch.nn.Conv2d(3, 10, 5)(prop)
-        print(prop.shape)
-        prop = torch.nn.MaxPool2d(2, stride=2)(prop)
-        print(prop.shape)
-        prop = torch.nn.Conv2d(10, 16, 3)(prop)
-        print(prop.shape)
-        prop = torch.nn.MaxPool2d(2, stride=2)(prop)
-        print(prop.shape)
-        break
-    sys.exit(0)
-    '''
+    if 1 == 0:
+        for batchIdx, dataIter in enumerate(trainLoader):
+            prop = dataIter[0]
+            print(prop.shape)
+            prop = torch.nn.Conv2d(3, 10, 5)(prop)
+            print(prop.shape)
+            prop = torch.nn.MaxPool2d(2, stride=2)(prop)
+            print(prop.shape)
+            prop = torch.nn.Conv2d(10, 16, 3)(prop)
+            print(prop.shape)
+            prop = torch.nn.MaxPool2d(2, stride=2)(prop)
+            print(prop.shape)
+            break
+        sys.exit(0)
     ### training
     if verbosity >= 1: print('using device:', deviceName)
     device    = torch.device(deviceName)       
@@ -197,7 +211,9 @@ def main():
                     figureName = figureDir + '/testPlot_batch' + str(batchIdx) +'_sample'+str(sampleIdx)+'.png'
                     labelName      = classes[labels[sampleIdx]]
                     predictionName = classes[predictions[sampleIdx]]
-                    plt.imshow(samples[sampleIdx][0], cmap='gray')
+                    ### NOTE: depends on color dim and normalization
+                    plt.imshow(np.transpose((np.array(samples[sampleIdx])+1)/2))
+                    ###
                     plt.title('label: '+labelName+', prediction: '+predictionName)
                     plt.axis('off')
                     plt.tight_layout()

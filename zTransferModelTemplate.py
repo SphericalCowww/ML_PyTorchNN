@@ -28,14 +28,15 @@ def modelObj(inputSize, classN):    # note: this is not a class
     model.fc = torch.nn.Linear(features, classN)    #automatically set this layer's par.requires_grad = True
     return model
 def main():
-    deviceName = GPUNAME
+    deviceName = 'cpu'#GPUNAME
     epochN     = 1
     batchSize  = 100
     learnRate  = 0.001
     randomSeed = 11 
 
     lossFunction = torch.nn.CrossEntropyLoss()
-    optimizerObj = lambda inputPars: torch.optim.Adam(inputPars, lr=learnRate)
+    #incorporate regularization: stackoverflow.com/questions/42704283
+    optimizerObj = lambda inputPars: torch.optim.Adam(inputPars, lr=learnRate, weight_decay=1E-5)
     #schedulerObj = lambda inputOpt, lastEpoch:\ 
     #    torch.optim.lr_scheduler.StepLR(inputOpt, last_epoch=lastEpoch, step_size=2, gamma=0.5)
     schedulerObj = lambda inputOpt, lastEpoch:\
@@ -48,13 +49,13 @@ def main():
     checkpointSavePath    = 'zTransferModelTemplate/model1.pth'
     tensorboardWriterPath = 'zTransferModelTemplate/model1'
     pathlib.Path('zTransferModelTemplate').mkdir(parents=True, exist_ok=True)
-    plotTestBatchN          = 10
-    plotTestSampleNperBatch = 10
+    plotTestBatchN          = 10000
+    plotTestSampleNperBatch = 1
     #############################################################
     ### loading data
     torch.manual_seed(randomSeed)
     dataDir   = './dataset/catDog/'
-    imageSize = 224
+    imageSize = 300#224
     dataTransformers = {'train': torchvision.transforms.Compose([\
                                     torchvision.transforms.RandomResizedCrop(imageSize),\
                                     torchvision.transforms.RandomHorizontalFlip(),\
@@ -172,7 +173,9 @@ def main():
                     figureName = figureDir + '/testPlot_batch' + str(batchIdx) +'_sample'+str(sampleIdx)+'.png'
                     labelName      = classes[labels[sampleIdx]]
                     predictionName = classes[predictions[sampleIdx]]
-                    plt.imshow(samples[sampleIdx][0], cmap='gray')
+                    ### NOTE: depends on color dim and normalization
+                    plt.imshow(np.transpose((np.array(samples[sampleIdx])+1)/2))
+                    ###
                     plt.title('label: '+labelName+', prediction: '+predictionName)
                     plt.axis('off')
                     plt.tight_layout()

@@ -166,7 +166,9 @@ def main():
                     figureName = figureDir + '/testPlot_batch' + str(batchIdx) +'_sample'+str(sampleIdx)+'.png'
                     labelName      = classes[labels[sampleIdx]]
                     predictionName = classes[predictions[sampleIdx]]
+                    ### NOTE: depends on color dim and normalization
                     plt.imshow(samples[sampleIdx][0], cmap='gray')
+                    ###
                     plt.title('label: '+labelName+', prediction: '+predictionName)
                     plt.axis('off')
                     plt.tight_layout()
