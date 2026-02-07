@@ -22,5 +22,5 @@
     >>> print("Device name:", torch.cuda.get_device_name(0))
 
 ## References:
-- StatQuest with Josh Starmer, concepts on neural networks in general (<a href="https://www.youtube.com/watch?v=CqOfi41LfDw">Youtube1</a>, <a href="https://www.youtube.com/watch?v=IN2XmBhILt4">2</a>; the first two are sufficient to review the basic ideas)
+- StatQuest with Josh Starmer, concepts on neural networks in general (<a href="https://www.youtube.com/watch?v=CqOfi41LfDw">Youtube1</a>, <a href="https://www.youtube.com/watch?v=IN2XmBhILt4">Youtube2</a> are sufficient for the main idea, and <a href="https://www.youtube.com/watch?v=GKZoOHXGcLo">Youtube3</a>, <a href="https://www.youtube.com/watch?v=GKZoOHXGcLo">Youtube4</a> are for backpropagation)
 - Patrick Loeber, Deep Learning With PyTorch - Full Course, (<a href="https://www.youtube.com/watch?v=c36lUUr864M">Youtube</a>)
