@@ -21,6 +21,12 @@
     >>> print("GPU device count:", torch.cuda.device_count())
     >>> print("Device name:", torch.cuda.get_device_name(0))
 
+    sudo apt install nvtop
+    nvtop                        # for monitoring GPU
+    sudo apt install psensor
+    # check psensor App, for monitoring temperatures 
+    # check also APP "NVIDIA X Server Settings" to adjust GPU settings
+
 ## Bullets:
 
   * for review: go through StatQuest in the references and z0...py to z3...py
