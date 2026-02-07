@@ -28,7 +28,7 @@ if torch.backends.mps.is_available() == True: GPUNAME = 'mps'
 # incorporated regularization: 
 #   stackoverflow.com/questions/42704283
 ###############################################################################################################
-class modelObj(torch.nn.Module):
+class modelObj_small(torch.nn.Module):
     def __init__(self, inputSize, classN):
         super().__init__()
         self.layerSquence = torch.nn.Sequential(\
@@ -50,16 +50,51 @@ class modelObj(torch.nn.Module):
             torch.nn.ReLU(),\
             torch.nn.Linear(100, 40),\
             torch.nn.ReLU(),\
-            torch.nn.Linear(40, classN))
-            #torch.nn.ReLU())
+            torch.nn.Linear(40, classN),
+            #torch.nn.ReLU()
+        )
     # NOTE: input size of the Linear layer need to be specifically evaluated
     # NOTE: the last ReLU activation is NOT needed because it's already included in torch.nn.CrossEntropyLoss()
     #############################################################
     def forward(self, x): return self.layerSquence(x)
+class modelObj(torch.nn.Module):
+    def __init__(self, inputSize, classN):
+        super().__init__()
+        self.layerSquence = torch.nn.Sequential(\
+    #############################################################
+            # Layer 1: Sees basic edges/colors
+            torch.nn.Conv2d(3, 32, kernel_size=3, padding=1), 
+            torch.nn.ReLU(),
+            torch.nn.BatchNorm2d(32),
+            torch.nn.MaxPool2d(2), # Image: 224 -> 112
+
+            # Layer 2: Sees textures/fur
+            torch.nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.BatchNorm2d(64),
+            torch.nn.MaxPool2d(2), # Image: 112 -> 56
+
+            # Layer 3: Sees parts (ears, noses)
+            torch.nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.BatchNorm2d(128),
+            torch.nn.MaxPool2d(2), # Image: 56 -> 28
+
+            torch.nn.Flatten(),
+    
+            # Linear layers for "The Decision"
+            torch.nn.Linear(128*4*4, 512),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.5), # Stronger dropout here!
+            torch.nn.Linear(512, classN),
+        )
+    #############################################################
+    def forward(self, x): return self.layerSquence(x)
+
 
 def main():
     deviceName = GPUNAME
-    epochN     = 10
+    epochN     = 100
     batchSize  = 25
     learnRate  = 0.001
     randomSeed = 11 
@@ -146,9 +181,8 @@ def main():
         scheduler = schedulerObj(optimizer, -1 if (checkpoint['epoch'] == -1) else checkpoint['epoch'] + 1)
     batchTotalN = len(trainLoader)
     for epoch in range(checkpoint['epoch']+1, epochN):
-        correctN = 0
-        sampleN  = 0
-        lossTot  = 0
+        model.train()
+        correctN, sampleN, lossTot = 0, 0, 0
         for batchIdx, dataIter in enumerate(tqdm(trainLoader)):
             samples = dataIter[0].to(device)
             labels  = dataIter[1].to(device)
@@ -182,6 +216,7 @@ def main():
             torch.save(checkpoint, checkpointSavePath)
             if verbosity >= 1: print('  saving:', checkpointSavePath)
         ### testing; independent from training
+        model.eval()
         correctN, sampleN = 0, 0
         with torch.no_grad():
             for batchIdx, dataIter in enumerate(testLoader):
@@ -200,6 +235,7 @@ def main():
             tensorboardWriter.add_scalar('validation', validation, epoch)
             tensorboardWriter.flush()
             tensorboardWriter.close()
+    model.eval()
     correctN, sampleN = 0, 0
     with torch.no_grad():
         figureDir = tensorboardWriterPath + '_testPlots'
@@ -218,8 +254,7 @@ def main():
                     labelName      = classes[labels[sampleIdx]]
                     predictionName = classes[predictions[sampleIdx]]
                     ### NOTE: depends on color dim and normalization
-                    if deviceName == 'cpu': plt.imshow(np.transpose((np.array(samples[sampleIdx])+1)/2))
-                    else:                   plt.imshow(np.transpose((np.array(samples[sampleIdx].cpu())+1)/2))
+                    plt.imshow(np.transpose((np.array(samples[sampleIdx].cpu())+1)/2))
                     ###
                     plt.title('label: '+labelName+', prediction: '+predictionName)
                     plt.axis('off')

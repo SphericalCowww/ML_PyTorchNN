@@ -11,18 +11,20 @@ from matplotlib import patches
 from matplotlib.colors import LogNorm
 import matplotlib.ticker as mticker
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 import numpy as np
 import pickle
 from tqdm import tqdm
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter   #tensorboard --logdir ...
-from torchvision.models import resnet18, ResNet18_Weights
 
 GPUNAME = 'cpu'
 if torch.cuda.is_available()         == True: GPUNAME = 'cuda'
 if torch.backends.mps.is_available() == True: GPUNAME = 'mps'
 ###############################################################################################################
+from torchvision.models import resnet18, ResNet18_Weights
 def modelObj(inputSize, classN):    # note: this is not a class
     weights = ResNet18_Weights.DEFAULT 
     model = resnet18(weights=weights)    
@@ -30,11 +32,13 @@ def modelObj(inputSize, classN):    # note: this is not a class
     features = model.fc.in_features
     model.fc = torch.nn.Linear(features, classN)    #automatically set this layer's par.requires_grad = True
     return model
+RESNET_MEAN = np.array([0.485, 0.456, 0.406])
+RESNET_STD  = np.array([0.229, 0.224, 0.225])
 def main():
     deviceName = GPUNAME
     epochN     = 3
     batchSize  = 100
-    learnRate  = 0.001
+    learnRate  = 0.0001
     randomSeed = 11 
 
     lossFunction = torch.nn.CrossEntropyLoss()
@@ -63,14 +67,12 @@ def main():
                                     torchvision.transforms.RandomResizedCrop(imageSize),\
                                     torchvision.transforms.RandomHorizontalFlip(),\
                                     torchvision.transforms.ToTensor(),\
-                                    torchvision.transforms.Normalize([0.485, 0.456, 0.406],\
-                                                                     [0.229, 0.224, 0.225])]),
+                                    torchvision.transforms.Normalize(RESNET_MEAN, RESNET_STD)]),
                         'test':  torchvision.transforms.Compose([\
                                     torchvision.transforms.Resize(imageSize),
                                     torchvision.transforms.CenterCrop(imageSize),
                                     torchvision.transforms.ToTensor(),\
-                                    torchvision.transforms.Normalize([0.485, 0.456, 0.406],\
-                                                                     [0.229, 0.224, 0.225])]),}    
+                                    torchvision.transforms.Normalize(RESNET_MEAN, RESNET_STD)]),}    
 
     trainData = torchvision.datasets.ImageFolder(dataDir+'train', transform=dataTransformers['train'])
     testData  = torchvision.datasets.ImageFolder(dataDir+'test',  transform=dataTransformers['test'])
@@ -83,8 +85,11 @@ def main():
     if verbosity >= 1:
         print('dataShape:', dataShape)
         print('classN   :', classN)
+        print('train mapping:', trainData.class_to_idx)
+        print('test mapping :', testData.class_to_idx)
     ### training
-    if verbosity >= 1: print('using device:', deviceName)
+    if verbosity >= 1: 
+        print('using device:', deviceName)
     device    = torch.device(deviceName)       
     model     = modelObj(inputSize, classN)
     optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
@@ -114,9 +119,8 @@ def main():
         scheduler = schedulerObj(optimizer, -1 if (checkpoint['epoch'] == -1) else checkpoint['epoch'] + 1)
     batchTotalN = len(trainLoader)
     for epoch in range(checkpoint['epoch']+1, epochN):
-        correctN = 0
-        sampleN  = 0
-        lossTot  = 0
+        model.train()
+        correctN, sampleN, lossTot = 0, 0, 0
         for batchIdx, dataIter in enumerate(tqdm(trainLoader)):
             samples = dataIter[0].to(device)
             labels  = dataIter[1].to(device)
@@ -150,6 +154,7 @@ def main():
             torch.save(checkpoint, checkpointSavePath)
             if verbosity >= 1: print('  saving:', checkpointSavePath)
         ### testing; independent from training
+        model.eval()
         correctN, sampleN = 0, 0
         with torch.no_grad():
             for batchIdx, dataIter in enumerate(testLoader):
@@ -168,6 +173,7 @@ def main():
             tensorboardWriter.add_scalar('validation', validation, epoch)
             tensorboardWriter.flush()
             tensorboardWriter.close()
+    model.eval()
     correctN, sampleN = 0, 0
     with torch.no_grad():
         figureDir = tensorboardWriterPath + '_testPlots'
@@ -186,8 +192,10 @@ def main():
                     labelName      = classes[labels[sampleIdx]]
                     predictionName = classes[predictions[sampleIdx]]
                     ### NOTE: depends on color dim and normalization
-                    if deviceName == 'cpu': plt.imshow(np.transpose((np.array(samples[sampleIdx])+1)/2))
-                    else:                   plt.imshow(np.transpose((np.array(samples[sampleIdx].cpu())+1)/2))
+                    img = samples[sampleIdx].cpu().numpy().transpose((1, 2, 0))
+                    img = RESNET_STD*img + RESNET_MEAN      # undo normalization
+                    img = np.clip(img, 0, 1)                # ensure values stay between 0 and 1
+                    plt.imshow(img)
                     ###
                     plt.title('label: '+labelName+', prediction: '+predictionName)
                     plt.axis('off')

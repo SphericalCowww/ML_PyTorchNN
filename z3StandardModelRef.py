@@ -70,6 +70,7 @@ def main():
     model     = modelObj(inputSize, classN)
     optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
     batchTotalN = len(trainLoader)
+    model.train()
     for epoch in range(epochN):
         for batchIdx, dataIter in enumerate(trainLoader):
             samples = dataIter[0].to(device)
@@ -86,6 +87,7 @@ def main():
                       'step:',   str(batchIdx+1)+'/'+str(batchTotalN)+',',\
                       'loss =', loss.item())
     ### testing
+    model.eval()
     with torch.no_grad():
         correctN = 0
         sampleN  = 0

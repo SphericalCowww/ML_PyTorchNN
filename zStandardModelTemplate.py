@@ -140,6 +140,7 @@ def main():
             tensorboardWriter.add_scalar('accuracy', accuracy, epoch) 
             tensorboardWriter.close()
         ### testing; independent from training
+        model.eval()
         correctN, sampleN = 0, 0
         with torch.no_grad():
             figureDir = tensorboardWriterPath + '_testPlots_epoch' + str(epoch)
@@ -160,6 +161,7 @@ def main():
             tensorboardWriter.add_scalar('validation', validation, epoch)
             tensorboardWriter.flush()
             tensorboardWriter.close()
+    model.eval()
     correctN, sampleN = 0, 0
     with torch.no_grad():
         figureDir = tensorboardWriterPath + '_testPlots'
@@ -178,8 +180,7 @@ def main():
                     labelName      = classes[labels[sampleIdx]]
                     predictionName = classes[predictions[sampleIdx]]
                     ### NOTE: depends on color dim and normalization
-                    if deviceName == 'cpu': plt.imshow(np.transpose((np.array(samples[sampleIdx])+1)/2))
-                    else:                   plt.imshow(np.transpose((np.array(samples[sampleIdx].cpu())+1)/2))
+                    plt.imshow(np.transpose((np.array(samples[sampleIdx].cpu())+1)/2))
                     ###
                     plt.title('label: '+labelName+', prediction: '+predictionName)
                     plt.axis('off')
