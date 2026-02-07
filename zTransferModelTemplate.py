@@ -17,19 +17,22 @@ from tqdm import tqdm
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter   #tensorboard --logdir ...
+from torchvision.models import resnet18, ResNet18_Weights
+
 GPUNAME = 'cpu'
 if torch.cuda.is_available()         == True: GPUNAME = 'cuda'
 if torch.backends.mps.is_available() == True: GPUNAME = 'mps'
 ###############################################################################################################
 def modelObj(inputSize, classN):    # note: this is not a class
-    model = torchvision.models.resnet18(pretrained=True)
-    #for par in model.parameters(): par.requires_grad = False    #fix the weights of all layers
+    weights = ResNet18_Weights.DEFAULT 
+    model = resnet18(weights=weights)    
+
     features = model.fc.in_features
     model.fc = torch.nn.Linear(features, classN)    #automatically set this layer's par.requires_grad = True
     return model
 def main():
     deviceName = GPUNAME
-    epochN     = 1
+    epochN     = 3
     batchSize  = 100
     learnRate  = 0.001
     randomSeed = 11 
@@ -55,16 +58,19 @@ def main():
     ### loading data
     torch.manual_seed(randomSeed)
     dataDir   = './dataset/catDog/'
-    imageSize = 300#224
+    imageSize = 224
     dataTransformers = {'train': torchvision.transforms.Compose([\
                                     torchvision.transforms.RandomResizedCrop(imageSize),\
                                     torchvision.transforms.RandomHorizontalFlip(),\
                                     torchvision.transforms.ToTensor(),\
-                                    torchvision.transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]),
+                                    torchvision.transforms.Normalize([0.485, 0.456, 0.406],\
+                                                                     [0.229, 0.224, 0.225])]),
                         'test':  torchvision.transforms.Compose([\
-                                    torchvision.transforms.RandomResizedCrop(imageSize),\
+                                    torchvision.transforms.Resize(imageSize),
+                                    torchvision.transforms.CenterCrop(imageSize),
                                     torchvision.transforms.ToTensor(),\
-                                    torchvision.transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]),}    
+                                    torchvision.transforms.Normalize([0.485, 0.456, 0.406],\
+                                                                     [0.229, 0.224, 0.225])]),}    
 
     trainData = torchvision.datasets.ImageFolder(dataDir+'train', transform=dataTransformers['train'])
     testData  = torchvision.datasets.ImageFolder(dataDir+'test',  transform=dataTransformers['test'])
@@ -84,16 +90,21 @@ def main():
     optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
     checkpoint = {'epoch': -1}
     if checkpointLoadPath is not None:
-        if os.path.exists(checkpointLoadPath) == False: checkpointLoadPath = None
-        checkpoint = torch.load(checkpointLoadPath)
-        model    .load_state_dict(checkpoint['model_state'])
-        optimizer.load_state_dict(checkpoint['optimizer_state'])
-        if verbosity >= 1: 
-            print('  loading:', checkpointLoadPath)
-            print('    epoch:', checkpoint['epoch']+1)
-        if verbosity >= 2: 
-            optParDict = optimizer.state_dict()['param_groups'][0]
-            for key in optParDict: print('   ', key, ':', optParDict[key])
+        if os.path.exists(checkpointLoadPath) == False: 
+            checkpointLoadPath = None
+            if verbosity >= 1: 
+                print('  loading:', checkpointLoadPath)
+                print('    epoch:', 0)
+        else:
+            checkpoint = torch.load(checkpointLoadPath)
+            model    .load_state_dict(checkpoint['model_state'])
+            optimizer.load_state_dict(checkpoint['optimizer_state'])
+            if verbosity >= 1: 
+                print('  loading:', checkpointLoadPath)
+                print('    epoch:', checkpoint['epoch']+1)
+            if verbosity >= 2: 
+                optParDict = optimizer.state_dict()['param_groups'][0]
+                for key in optParDict: print('   ', key, ':', optParDict[key])
     else: 
         model     = modelObj(inputSize, classN)
         optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
@@ -138,11 +149,6 @@ def main():
         if checkpointSavePath is not None:
             torch.save(checkpoint, checkpointSavePath)
             if verbosity >= 1: print('  saving:', checkpointSavePath)
-        if tensorboardWriterPath is not None:
-            tensorboardWriter = SummaryWriter(tensorboardWriterPath)
-            tensorboardWriter.add_scalar('loss',     lossTot,  epoch)
-            tensorboardWriter.add_scalar('accuracy', accuracy, epoch) 
-            tensorboardWriter.close()
         ### testing; independent from training
         correctN, sampleN = 0, 0
         with torch.no_grad():
@@ -153,8 +159,15 @@ def main():
                 predictions = torch.max(outputs, 1)[1] 
                 sampleN  += labels.shape[0]
                 correctN += (predictions == labels).sum().item() 
-        accuracy = 100.0*(correctN/sampleN)
-        if verbosity >= 1: print('  test validation accuracy = ', accuracy, '%\ndone')
+        validation = 100.0*(correctN/sampleN)
+        if verbosity >= 1: print('  test validation accuracy = ', validation, '%\n')
+        if tensorboardWriterPath is not None:
+            tensorboardWriter = SummaryWriter(tensorboardWriterPath)
+            tensorboardWriter.add_scalar('loss',       lossTot,  epoch)
+            tensorboardWriter.add_scalar('accuracy',   accuracy, epoch)
+            tensorboardWriter.add_scalar('validation', validation, epoch)
+            tensorboardWriter.flush()
+            tensorboardWriter.close()
     correctN, sampleN = 0, 0
     with torch.no_grad():
         figureDir = tensorboardWriterPath + '_testPlots'
@@ -166,16 +179,15 @@ def main():
             predictions = torch.max(outputs, 1)[1]
             sampleN  += labels.shape[0]
             correctN += (predictions == labels).sum().item()
-            if deviceName != 'cpu':
-                warnings.warn('\nmain(): deviceName needs to be \'cpu\' to generate test plots', Warning)
-            if (deviceName == 'cpu') and (batchIdx < plotTestBatchN):
+            if batchIdx < plotTestBatchN:
                 for sampleIdx in range(len(samples)): 
                     if plotTestSampleNperBatch <= sampleIdx: break
                     figureName = figureDir + '/testPlot_batch' + str(batchIdx) +'_sample'+str(sampleIdx)+'.png'
                     labelName      = classes[labels[sampleIdx]]
                     predictionName = classes[predictions[sampleIdx]]
                     ### NOTE: depends on color dim and normalization
-                    plt.imshow(np.transpose((np.array(samples[sampleIdx])+1)/2))
+                    if deviceName == 'cpu': plt.imshow(np.transpose((np.array(samples[sampleIdx])+1)/2))
+                    else:                   plt.imshow(np.transpose((np.array(samples[sampleIdx].cpu())+1)/2))
                     ###
                     plt.title('label: '+labelName+', prediction: '+predictionName)
                     plt.axis('off')
@@ -183,8 +195,8 @@ def main():
                     plt.savefig(figureName)
                     if verbosity >= 1: print('  saving:', figureName)
                     plt.clf()
-    accuracy = 100.0*(correctN/sampleN)
-    if verbosity >= 1: print('  final test validation accuracy = ', accuracy, '%\ndone')
+    validation = 100.0*(correctN/sampleN)
+    if verbosity >= 1: print('  final test validation accuracy = ', validation, '%\ndone')
 ###############################################################################################################
 #https://discuss.pytorch.org/t/moving-optimizer-from-cpu-to-gpu/96068/2
 def optimizer_to(optim, device):
