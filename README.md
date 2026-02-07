@@ -24,6 +24,7 @@
 ## Bullets:
 
   * for review: go through StatQuest in the references and z0...py to z3...py
+  * dataset from MNIST, and cat&dog data set from online linked in the reference
   * set ``checkpointLoadPath = None`` to redo the training every time
   * for tracking, use TensorBoard on the recorded data, e.g., ``tensorboard --logdir yTransferModelTemplate/model1`` and go to the browser ``http://localhost:6006``
 
