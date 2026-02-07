@@ -24,9 +24,9 @@ def main():
     print('')
     print(w)
     print(loss)
-    print(w.grad)
+    print(w.grad)                       #partial(loss)/partial(w)
     print(loss.grad)
-
+    print(x.grad, y.grad, y_hat.grad)   #all None, because requires_grad=False by default
 
 if __name__ == '__main__': main()
 

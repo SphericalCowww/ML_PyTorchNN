@@ -30,12 +30,12 @@ def main():
         y_hat   = forwardFunc(w, x)
         lossVal = lossFunc(y, y_hat)
         lossVal.backward()
-        with torch.no_grad():               #required so that w.grad() doesn't change while updating w
+        with torch.no_grad():                   #required so that w.grad() doesn't change while updating w
             w -= learningRate * w.grad
-        w.grad.zero_()                      #required so that w.grad() is reevaluated every epoch
+        w.grad.zero_()                          #required so that w.grad() is reevaluated every epoch
         if epochIter % 10 == 0:
             print(f'epoch {epochIter}: w = {w:.3f}, loss = {lossVal:.8f}')
-            print('  y_hat =', y_hat.detach().numpy())
+            print('  y_hat =', y_hat.detach().numpy(), "\n")
     print(f'predict(x_test) = {forwardFunc(w, x_test)}')
     print('done')
 

@@ -31,7 +31,7 @@ def main():
     print(f'y_sampleN = {y_sampleN}, y_featureN = {y_featureN}')
     print(f'predict(x_test) = {model(x_test)}')    
     for epochIter in range(epochN):
-        y_hat   = model(x)
+        y_hat   = model(x)                  #NOTE: this is passed by reference
         lossVal = lossFunc(y, y_hat)
         lossVal.backward()
         optimizer.step()
@@ -44,6 +44,9 @@ def main():
     print('done')
 
 if __name__ == '__main__': main()
+
+
+
 
 
 

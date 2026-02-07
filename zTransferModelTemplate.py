@@ -17,7 +17,7 @@ from tqdm import tqdm
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter   #tensorboard --logdir ...
-GPUNAME = None
+GPUNAME = 'cpu'
 if torch.cuda.is_available()         == True: GPUNAME = 'cuda'
 if torch.backends.mps.is_available() == True: GPUNAME = 'mps'
 ###############################################################################################################
@@ -28,7 +28,7 @@ def modelObj(inputSize, classN):    # note: this is not a class
     model.fc = torch.nn.Linear(features, classN)    #automatically set this layer's par.requires_grad = True
     return model
 def main():
-    deviceName = 'cpu'#GPUNAME
+    deviceName = GPUNAME
     epochN     = 1
     batchSize  = 100
     learnRate  = 0.001
@@ -45,10 +45,10 @@ def main():
 
     verbosity   = 2
     printBatchN = 100
-    checkpointLoadPath    = 'zTransferModelTemplate/model1.pth'
-    checkpointSavePath    = 'zTransferModelTemplate/model1.pth'
-    tensorboardWriterPath = 'zTransferModelTemplate/model1'
-    pathlib.Path('zTransferModelTemplate').mkdir(parents=True, exist_ok=True)
+    checkpointLoadPath    = 'yTransferModelTemplate/model1.pth'
+    checkpointSavePath    = 'yTransferModelTemplate/model1.pth'
+    tensorboardWriterPath = 'yTransferModelTemplate/model1'
+    pathlib.Path('yTransferModelTemplate').mkdir(parents=True, exist_ok=True)
     plotTestBatchN          = 10000
     plotTestSampleNperBatch = 1
     #############################################################
@@ -84,6 +84,7 @@ def main():
     optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
     checkpoint = {'epoch': -1}
     if checkpointLoadPath is not None:
+        if os.path.exists(checkpointLoadPath) == False: checkpointLoadPath = None
         checkpoint = torch.load(checkpointLoadPath)
         model    .load_state_dict(checkpoint['model_state'])
         optimizer.load_state_dict(checkpoint['optimizer_state'])
