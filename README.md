@@ -35,6 +35,7 @@
   * for tracking, use TensorBoard on the recorded data, e.g., ``tensorboard --logdir yTransferModelTemplate/model1`` and go to the browser ``http://localhost:6006``
 
 ## References:
-- StatQuest with Josh Starmer, concepts on neural networks in general (<a href="https://www.youtube.com/watch?v=CqOfi41LfDw">Youtube1</a>, <a href="https://www.youtube.com/watch?v=IN2XmBhILt4">Youtube2</a> are sufficient for the main idea, and <a href="https://www.youtube.com/watch?v=GKZoOHXGcLo">Youtube3</a>, <a href="https://www.youtube.com/watch?v=GKZoOHXGcLo">Youtube4</a> are for backpropagation)
-- Patrick Loeber, Deep Learning With PyTorch - Full Course (<a href="https://www.youtube.com/watch?v=c36lUUr864M">Youtube</a>)
+- StatQuest with Josh Starmer, concepts on neural networks in general (<a href="https://www.youtube.com/watch?v=CqOfi41LfDw">YouTube1</a>, <a href="https://www.youtube.com/watch?v=IN2XmBhILt4">YouTube2</a> are sufficient for the main idea, and <a href="https://www.youtube.com/watch?v=GKZoOHXGcLo">YouTube3</a>, <a href="https://www.youtube.com/watch?v=GKZoOHXGcLo">YouTube4</a> are for backpropagation)
+- Patrick Loeber, Deep Learning With PyTorch - Full Course (<a href="https://www.youtube.com/watch?v=c36lUUr864M">YouTube</a>)
 - Bhavik Jikadara, Cats and Dogs Classification Dataset (<a href="https://www.kaggle.com/datasets/bhavikjikadara/dog-and-cat-classification-dataset">WebSite</a>)
+- mildlyoverfitted, Vision Transformer in PyTorch (<a href="https://www.youtube.com/watch?v=ovB0ddFtzzA">YouTube</a>)
