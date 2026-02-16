@@ -28,7 +28,6 @@ class PatchEmbedding(torch.nn.Module):
         self.patchDim = patchDim
         self.patchN = pow(math.floor(inputDim/patchDim), 2)
         self.attributeProjection = torch.nn.Conv2d(channelN, embedDim, kernel_size=patchDim, stride=patchDim)
-
     def forward(self, x):
         # input: (sampleN, channelN, inputDim, inputDim)
         x = self.attributeProjection(x) 
@@ -38,7 +37,6 @@ class PatchEmbedding(torch.nn.Module):
         x = x.transpose(1, 2)
         # => (sampleN, patchN, embedDim)
         return x
-
 class Attention(torch.nn.Module):
     def __init__(self, inputDim, attnHeadN=12, qkvBias=True, attnDropProb=0.0, outputDropProb=0.0):
         #qkv: query, key, value
@@ -53,12 +51,10 @@ class Attention(torch.nn.Module):
         self.attnDropout   = torch.nn.Dropout(attnDropProb)
         self.outputLin     = torch.nn.Linear(inputDim, inputDim)
         self.outputDropOut = torch.nn.Dropout(outputDropProb)
-    
     def forward(self, x):
         sampleN, tokenN, inputDim = x.shape
         if inputDim != self.inputDim:
             raise ValueError("attention.forward(): input dimension mismatch")
-
         # input: (sampleN, patchN+1, inputDim)
         qkv = self.qkvLin(x)
         # => (sampleN, patchN+1, inputDim * qkv_number)
@@ -84,7 +80,6 @@ class Attention(torch.nn.Module):
         x = self.outputDropOut(x)
         # => (sampleN, patchN+1, inputDim)
         return x
-
 class MultilayerPerceptron(torch.nn.Module):
     def __init__(self, inputFeatureN, hiddenFeatureN, outputFeatureN, dropoutProb=0.0):
         super().__init__()
@@ -115,7 +110,6 @@ class Block(torch.nn.Module):
         x = x + self.mlp( self.norm2(x))
         # => (sampleN, patchN+1, inputDim)
         return x
-
 class modelObj(torch.nn.Module):
     def __init__(self,\
                  inputDim=384,\
@@ -132,14 +126,15 @@ class modelObj(torch.nn.Module):
         super().__init__()
         self.patchEmbed = PatchEmbedding(inputDim, channelN, patchDim, embedDim)
         self.classToken = torch.nn.Parameter(torch.zeros(1, 1, embedDim))
+        torch.nn.init.trunc_normal_(self.classToken, std=0.02)
         self.posEmbed   = torch.nn.Parameter(torch.zeros(1, 1+self.patchEmbed.patchN, embedDim))
+        torch.nn.init.trunc_normal_(self.posEmbed, std=0.02)
         self.posDrop    = torch.nn.Dropout(outputDropProb)
         self.blocks     = torch.nn.ModuleList([Block(embedDim, attnHeadN, qkvBias, mlpRatio,\
                                                      attnDropProb, outputDropProb)
                                                for _ in range(blockDepth)])
         self.norm = torch.nn.LayerNorm(embedDim, eps=1.0E-6)                           
         self.head = torch.nn.Linear(embedDim, classN)
-
     def forward(self, x):
         # input: (sampleN, channelN, inputDim, inputDim)
         sampleN = x.shape[0]
@@ -163,8 +158,9 @@ class modelObj(torch.nn.Module):
 def get_parN(module):
     return np.sum([par.numel() for par in module.parameters() if par.requires_grad])
 def is_tensor_same(tensor1, tensor2):
-    arr1, arr2 = tensor1.detach().numpy, tensor2.detach().numpy
-    return np.testing.assert_allclose(arr1, arr2) 
+    arr1 = tensor1.detach().cpu().numpy()
+    arr2 = tensor2.detach().cpu().numpy()
+    return np.testing.assert_allclose(arr1, arr2)
 ###############################################################################################################
 def main():
     deviceName = GPUNAME
@@ -191,20 +187,27 @@ def main():
     torch.manual_seed(randomSeed)
     dataDir   = './dataset/catDog/'
     imageSize = 224
+    imageMean = [0.5]
+    imageSTD  = [0.5]
     dataTransformers = {'train': torchvision.transforms.Compose([\
                                     torchvision.transforms.RandomResizedCrop(imageSize),\
                                     torchvision.transforms.RandomHorizontalFlip(),\
-                                    torchvision.transforms.ToTensor()]),
+                                    torchvision.transforms.ToTensor(),\
+                                    torchvision.transforms.Normalize(imageMean, imageSTD)]),
                         'test':  torchvision.transforms.Compose([\
-                                    torchvision.transforms.Resize(imageSize),
-                                    torchvision.transforms.CenterCrop(imageSize),
-                                    torchvision.transforms.ToTensor()]),}    
+                                    torchvision.transforms.Resize(imageSize),\
+                                    torchvision.transforms.CenterCrop(imageSize),\
+                                    torchvision.transforms.ToTensor(),\
+                                    torchvision.transforms.Normalize(imageMean, imageSTD)]),}    
 
     trainData = torchvision.datasets.ImageFolder(dataDir+'train', transform=dataTransformers['train'])
     testData  = torchvision.datasets.ImageFolder(dataDir+'test',  transform=dataTransformers['test'])
     classes = ['cat', 'dog']
-    trainLoader = torch.utils.data.DataLoader(dataset=trainData, batch_size=batchSize, shuffle=True)
-    testLoader  = torch.utils.data.DataLoader(dataset=testData,  batch_size=batchSize, shuffle=False)
+    loaderArgs = {'batch_size': batchSize}
+    if GPUNAME == 'cuda':
+        loaderArgs = {'batch_size': batchSize, 'num_workers': 8, 'pin_memory': True}
+    trainLoader = torch.utils.data.DataLoader(dataset=trainData, shuffle=True,  **loaderArgs)
+    testLoader  = torch.utils.data.DataLoader(dataset=testData,  shuffle=False, **loaderArgs)
     dataShape = [len(trainData), trainData[0][0].shape[0], trainData[0][0].shape[1]]
     inputSize = dataShape[1]*dataShape[2]
     classN    = len(classes)
@@ -245,29 +248,30 @@ def main():
             if verbosity >= 2: 
                 optParDict = optimizer.state_dict()['param_groups'][0]
                 for key in optParDict: print('   ', key, ':', optParDict[key])
-    else: 
-        model     = modelObj(inputSize, classN)
-        optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
     model.to(device)
     optimizer_to(optimizer, device)
     if schedulerObj is not None:
         scheduler = schedulerObj(optimizer, -1 if (checkpoint['epoch'] == -1) else checkpoint['epoch'] + 1)
     batchTotalN = len(trainLoader)
+    scaler = torch.cuda.amp.GradScaler(enabled=(GPUNAME == 'cuda'))
     for epoch in range(checkpoint['epoch']+1, epochN):
-        correctN = 0
-        sampleN  = 0
-        lossTot  = 0
+        model.train()
+        correctN, sampleN, lossTot = 0, 0, 0
         for batchIdx, dataIter in enumerate(tqdm(trainLoader)):
-            samples = dataIter[0].to(device)
-            labels  = dataIter[1].to(device)
-            #forward
-            outputs = model(samples) 
-            loss    = lossFunction(outputs, labels)
-            #backward
-            optimizer.zero_grad()                   #required so that w.grad() is reevaluated every epoch
-            loss.backward()
-            optimizer.step()
-            #trend tracking
+            samples = dataIter[0].to(device, non_blocking=True)
+            labels  = dataIter[1].to(device, non_blocking=True)
+            ### forward
+            with torch.cuda.amp.autocast(enabled=(GPUNAME == 'cuda')):
+                outputs = model(samples) 
+                loss    = lossFunction(outputs, labels)
+            ### backward
+            optimizer.zero_grad(set_to_none=True)                   #required so that w.grad() is reevaluated every epoch
+            #loss.backward()
+            #optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            ### trend tracking
             lossTot += loss.item()
             predictions = torch.max(outputs, 1)[1]
             sampleN  += labels.shape[0]
@@ -289,11 +293,6 @@ def main():
         if checkpointSavePath is not None:
             torch.save(checkpoint, checkpointSavePath)
             if verbosity >= 1: print('  saving:', checkpointSavePath)
-        if tensorboardWriterPath is not None:
-            tensorboardWriter = SummaryWriter(tensorboardWriterPath)
-            tensorboardWriter.add_scalar('loss',     lossTot,  epoch)
-            tensorboardWriter.add_scalar('accuracy', accuracy, epoch) 
-            tensorboardWriter.close()
         ### testing; independent from training
         model.eval()
         correctN, sampleN = 0, 0
@@ -311,9 +310,10 @@ def main():
         if verbosity >= 1: print('  test validation accuracy = ', validation, '%\n')
         if tensorboardWriterPath is not None:
             tensorboardWriter = SummaryWriter(tensorboardWriterPath)
-            tensorboardWriter.add_scalar('loss',       lossTot,  epoch)
-            tensorboardWriter.add_scalar('accuracy',   accuracy, epoch)
-            tensorboardWriter.add_scalar('validation', validation, epoch)
+            tensorboardWriter.add_scalar('loss_tot',   lossTot,                  epoch)
+            tensorboardWriter.add_scalar('loss_train', lossTot/len(trainLoader), epoch)
+            tensorboardWriter.add_scalar('accuracy',   accuracy,                 epoch)
+            tensorboardWriter.add_scalar('validation', validation,               epoch)
             tensorboardWriter.flush()
             tensorboardWriter.close()
     model.eval()
@@ -335,7 +335,7 @@ def main():
                     labelName      = classes[labels[sampleIdx]]
                     predictionName = classes[predictions[sampleIdx]]
                     ### NOTE: depends on color dim and normalization
-                    plt.imshow(np.transpose((np.array(samples[sampleIdx].cpu())+1)/2))
+                    plt.imshow(np.transpose((np.array(samples[sampleIdx].cpu())+1)/2, (1, 2, 0)))
                     ###
                     plt.title('label: '+labelName+', prediction: '+predictionName)
                     plt.axis('off')

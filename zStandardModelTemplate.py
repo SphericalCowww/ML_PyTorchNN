@@ -99,6 +99,7 @@ def main():
         scheduler = schedulerObj(optimizer, -1 if (checkpoint['epoch'] == -1) else checkpoint['epoch'] + 1)
     batchTotalN = len(trainLoader)
     for epoch in range(checkpoint['epoch']+1, epochN):
+        model.train()
         correctN = 0
         sampleN  = 0
         lossTot  = 0
