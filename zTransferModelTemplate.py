@@ -52,10 +52,10 @@ def main():
 
     verbosity   = 2
     printBatchN = 100
+    pathlib.Path('yTransferModelTemplate').mkdir(parents=True, exist_ok=True)
     checkpointLoadPath    = 'yTransferModelTemplate/model1.pth'
     checkpointSavePath    = 'yTransferModelTemplate/model1.pth'
     tensorboardWriterPath = 'yTransferModelTemplate/model1'
-    pathlib.Path('yTransferModelTemplate').mkdir(parents=True, exist_ok=True)
     plotTestBatchN          = 10000
     plotTestSampleNperBatch = 1
     #############################################################

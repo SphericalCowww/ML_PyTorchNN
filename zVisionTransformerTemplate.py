@@ -22,13 +22,12 @@ if torch.cuda.is_available()         == True: GPUNAME = 'cuda'
 if torch.backends.mps.is_available() == True: GPUNAME = 'mps'
 ###############################################################################################################
 class PatchEmbedding(torch.nn.Module):
-    def __init__(self, inputDim, patchDim, channelN=3, embedDim=768):
+    def __init__(self, inputDim, channelN, patchDim, embedDim=768):
         super().__init__()
         self.inputDim = inputDim
         self.patchDim = patchDim
         self.patchN = pow(math.floor(inputDim/patchDim), 2)
-        
-        self.attributeProjection = nn.Conv2d(channelN, embedDim, kernel_size=patchDim, stride=patchDim)
+        self.attributeProjection = torch.nn.Conv2d(channelN, embedDim, kernel_size=patchDim, stride=patchDim)
 
     def forward(self, x):
         # input: (sampleN, channelN, inputDim, inputDim)
@@ -43,7 +42,7 @@ class PatchEmbedding(torch.nn.Module):
 class Attention(torch.nn.Module):
     def __init__(self, inputDim, attnHeadN=12, qkvBias=True, attnDropProb=0.0, outputDropProb=0.0):
         #qkv: query, key, value
-        super().__i`nit__()
+        super().__init__()
         self.inputDim      = inputDim
         self.qkv_number    = 3
         self.attnHeadN     = attnHeadN
@@ -112,30 +111,30 @@ class Block(torch.nn.Module):
         self.mlp   = MultilayerPerceptron(inputDim, int(inputDim*mlpRatio), inputDim)
     def forward(self, x):
         # input: (sampleN, patchN+1, inputDim)
-        x = x + self.attn(self.norm1)
-        x = x + self.mlp( self.norm2)
+        x = x + self.attn(self.norm1(x))
+        x = x + self.mlp( self.norm2(x))
         # => (sampleN, patchN+1, inputDim)
         return x
 
-class VisionTransformer(torch.nn.Module):
+class modelObj(torch.nn.Module):
     def __init__(self,\
                  inputDim=384,\
-                 patchDim=16,\
                  channelN=3,\
-                 classN=1000,\
+                 classN=10,\
+                 patchDim=16,\
                  embedDim=768,\
                  blockDepth=12,\
                  attnHeadN=12,\
                  qkvBias=True,\
                  mlpRatio=4.0,\
                  attnDropProb=0.0,\
-                 outputDropProb=0.0)
+                 outputDropProb=0.0):
         super().__init__()
-        self.patchEmbed = PatchEmbedding(self, inputDim, patchDim, channelN, embedDim)
+        self.patchEmbed = PatchEmbedding(inputDim, channelN, patchDim, embedDim)
         self.classToken = torch.nn.Parameter(torch.zeros(1, 1, embedDim))
-        self.posEmbed   = torch.nn.Parameter(torch.zeros(1, 1+self.patchEmbed.patchDim, embedDim))
-        self.posDrop    = torch.nn.Dropout(dropoutProb)
-        self.blocks     = torch.nn.ModuleList([Block(embedDim, attnHeadN, mlp_ratio, qkv_bais,\
+        self.posEmbed   = torch.nn.Parameter(torch.zeros(1, 1+self.patchEmbed.patchN, embedDim))
+        self.posDrop    = torch.nn.Dropout(outputDropProb)
+        self.blocks     = torch.nn.ModuleList([Block(embedDim, attnHeadN, qkvBias, mlpRatio,\
                                                      attnDropProb, outputDropProb)
                                                for _ in range(blockDepth)])
         self.norm = torch.nn.LayerNorm(embedDim, eps=1.0E-6)                           
@@ -154,14 +153,18 @@ class VisionTransformer(torch.nn.Module):
         # => (sampleN, patchN+1, embedDim)
         for block in self.blocks:
             x = block(x)
+        x = self.norm(x)
         # => (sampleN, patchN+1, embedDim)
         token = x[:, 0]
         x = self.head(token)
         # => (sampleN, patchN+1, classN)
         return x
-
-
- 
+###############################################################################################################
+def get_parN(module):
+    return np.sum([par.numel() for par in module.parameters() if par.requires_grad])
+def is_tensor_same(tensor1, tensor2):
+    arr1, arr2 = tensor1.detach().numpy, tensor2.detach().numpy
+    return np.testing.assert_allclose(arr1, arr2) 
 ###############################################################################################################
 def main():
     deviceName = GPUNAME
@@ -177,29 +180,53 @@ def main():
  
     verbosity   = 2
     printBatchN = 100
-    checkpointLoadPath    = 'yStandardModelTemplate/model2.pth'
-    checkpointSavePath    = 'yStandardModelTemplate/model2.pth'
-    tensorboardWriterPath = 'yStandardModelTemplate/model2'
-    pathlib.Path('yStandardModelTemplate').mkdir(parents=True, exist_ok=True)
+    pathlib.Path('yVisionTransformerTemplate').mkdir(parents=True, exist_ok=True)
+    checkpointLoadPath    = 'yVisionTransformerTemplate/model1.pth'
+    checkpointSavePath    = 'yVisionTransformerTemplate/model1.pth'
+    tensorboardWriterPath = 'yVisionTransformerTemplate/model1'
     plotTestBatchN          = 10
     plotTestSampleNperBatch = 10
     #############################################################
     ### loading data
-    torch.manual_seed(randomSeed) 
-    trainData = torchvision.datasets.MNIST(root='./dataset', train=True,\
-                                           transform=torchvision.transforms.ToTensor())#, download=True)
-    testData  = torchvision.datasets.MNIST(root='./dataset', train=False,\
-                                           transform=torchvision.transforms.ToTensor())
-    classes = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+    torch.manual_seed(randomSeed)
+    dataDir   = './dataset/catDog/'
+    imageSize = 224
+    dataTransformers = {'train': torchvision.transforms.Compose([\
+                                    torchvision.transforms.RandomResizedCrop(imageSize),\
+                                    torchvision.transforms.RandomHorizontalFlip(),\
+                                    torchvision.transforms.ToTensor()]),
+                        'test':  torchvision.transforms.Compose([\
+                                    torchvision.transforms.Resize(imageSize),
+                                    torchvision.transforms.CenterCrop(imageSize),
+                                    torchvision.transforms.ToTensor()]),}    
+
+    trainData = torchvision.datasets.ImageFolder(dataDir+'train', transform=dataTransformers['train'])
+    testData  = torchvision.datasets.ImageFolder(dataDir+'test',  transform=dataTransformers['test'])
+    classes = ['cat', 'dog']
     trainLoader = torch.utils.data.DataLoader(dataset=trainData, batch_size=batchSize, shuffle=True)
     testLoader  = torch.utils.data.DataLoader(dataset=testData,  batch_size=batchSize, shuffle=False)
-    dataShape   = trainLoader.dataset.data.shape
+    dataShape = [len(trainData), trainData[0][0].shape[0], trainData[0][0].shape[1]]
     inputSize = dataShape[1]*dataShape[2]
-    classN    = len(np.unique(trainLoader.dataset.targets))
+    classN    = len(classes)
+    if verbosity >= 1:
+        print('dataShape:', dataShape)
+        print('classN   :', classN)
+        print('train mapping:', trainData.class_to_idx)
+        print('test mapping :', testData.class_to_idx)
     ### training
     if verbosity >= 1: print('using device:', deviceName)
-    device    = torch.device(deviceName)       
-    model     = modelObj(inputSize, classN)
+    device = torch.device(deviceName)       
+    model = modelObj(inputDim=imageSize,\
+                     channelN=3,\
+                     classN=classN,\
+                     patchDim=16,\
+                     embedDim=768,\
+                     blockDepth=12,\
+                     attnHeadN=12,\
+                     qkvBias=True,\
+                     mlpRatio=4.0,\
+                     attnDropProb=0.1,\
+                     outputDropProb=0.1)
     optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
     checkpoint = {'epoch': -1}
     if checkpointLoadPath is not None:

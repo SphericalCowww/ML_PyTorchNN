@@ -49,10 +49,10 @@ def main():
  
     verbosity   = 2
     printBatchN = 100
-    checkpointLoadPath    = 'yStandardModelTemplate/model2.pth'
-    checkpointSavePath    = 'yStandardModelTemplate/model2.pth'
-    tensorboardWriterPath = 'yStandardModelTemplate/model2'
     pathlib.Path('yStandardModelTemplate').mkdir(parents=True, exist_ok=True)
+    checkpointLoadPath    = 'yStandardModelTemplate/model1.pth'
+    checkpointSavePath    = 'yStandardModelTemplate/model1.pth'
+    tensorboardWriterPath = 'yStandardModelTemplate/model1'
     plotTestBatchN          = 10
     plotTestSampleNperBatch = 10
     #############################################################

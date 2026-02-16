@@ -107,10 +107,10 @@ def main():
  
     verbosity   = 2
     printBatchN = 1000
+    pathlib.Path('yCNNtemplate').mkdir(parents=True, exist_ok=True)
     checkpointLoadPath    = 'yCNNtemplate/model1.pth'
     checkpointSavePath    = 'yCNNtemplate/model1.pth'
     tensorboardWriterPath = 'yCNNtemplate/model1'
-    pathlib.Path('yCNNtemplate').mkdir(parents=True, exist_ok=True)
     plotTestBatchN          = 10
     plotTestSampleNperBatch = 10
     #############################################################
