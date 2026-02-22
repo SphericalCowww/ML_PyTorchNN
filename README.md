@@ -1,7 +1,7 @@
 # PyTorch Neural Network
 
 ## Keywords:
-- understanding CNN diagram dimensions: thickness comes from the number of different filters/kernels; no reduction in layer widthxheight due to zero-padding. The layer widthxheight only reduces in size after of max pooling (<a href="https://stackoverflow.com/questions/65554032/understanding-convolutional-layers-shapes">stackoverflow</a>)
+- understanding CNN diagram dimensions: thickness comes from the number of different filters/kernels; no reduction in layer widthxheight due to zero-padding. The layer widthxheight only reduces in size after max pooling (<a href="https://stackoverflow.com/questions/65554032/understanding-convolutional-layers-shapes">stackoverflow</a>)
 - bias-variance-tradeoff versus precision-recall-tradeoff (<a href="https://stackoverflow.com/questions/65554032/understanding-convolutional-layers-shapes">stackoverflow</a>)
 
 ## Setting up CUDA for PyTorch:
@@ -30,13 +30,14 @@
 ## Bullets:
 
   * for review: go through StatQuest in the references and z0...py to z3...py
-  * dataset from MNIST and cat&dog data set from online, their links are in the reference
+  * dataset from MNIST and cat&dog data set from (<a href="https://www.kaggle.com/datasets/bhavikjikadara/dog-and-cat-classification-dataset">link</a>), their links are in the reference
   * set ``checkpointLoadPath = None`` to redo the training every time
   * for tracking, use TensorBoard on the recorded data, e.g., ``tensorboard --logdir yTransferModelTemplate/model1`` and go to the browser ``http://localhost:6006``
 
 ## References:
 - StatQuest with Josh Starmer, concepts on neural networks in general (<a href="https://www.youtube.com/watch?v=CqOfi41LfDw">YouTube1</a>, <a href="https://www.youtube.com/watch?v=IN2XmBhILt4">YouTube2</a> are sufficient for the main idea, and <a href="https://www.youtube.com/watch?v=GKZoOHXGcLo">YouTube3</a>, <a href="https://www.youtube.com/watch?v=GKZoOHXGcLo">YouTube4</a> are for backpropagation)
 - StatQuest with Josh Starmer, path towards transformer (<a href="https://www.youtube.com/watch?v=AsNTP8Kwu80">RNN</a> => <a href="https://www.youtube.com/watch?v=YCzL96nL7j0">LSTM</a> => <a href="https://www.youtube.com/watch?v=viZrOnJclY0">token (word) embedding</a> => <a href="https://www.youtube.com/watch?v=L8HKweZIOmg">seq2seq</a> => <a href="https://www.youtube.com/watch?v=PSs6nxngL6k">attention layer</a> => <a href="https://www.youtube.com/watch?v=zxQyTK8quyY">transformer</a>: token embedding (token: unit of sequential input); position embedding; attention layer with query, key, and value (<a href="https://www.youtube.com/watch?v=eMlx5fFNoYc">QKV</a>, think of it like python dictionary, ``for K in Qs: V = dict[K]``); residual connection; Feed‑Forward networks (FFN consists of fully connected layers also known as multilayer perceptron); <a href="https://www.youtube.com/watch?v=GDN649X_acE">encoder</a> (bidirectional self‑attention) / <a href="https://www.youtube.com/watch?v=bQ5BoolX9Ag">decoder</a> (masked/causal self‑attention) / <a href="https://www.youtube.com/watch?v=zxQyTK8quyY">encoder+decoder</a> (cross-attention), most LLMs use decoder-only)
+- DeepFindr, Vision Transformer Quick Guide - Theory and Code in (almost) 15 min (<a href="https://www.youtube.com/watch?v=j3VNqtJUoz0">YouTube</a>) => ViT only uses encoder
+
 - Patrick Loeber, Deep Learning With PyTorch - Full Course (<a href="https://www.youtube.com/watch?v=c36lUUr864M">YouTube</a>)
-- Bhavik Jikadara, Cats and Dogs Classification Dataset (<a href="https://www.kaggle.com/datasets/bhavikjikadara/dog-and-cat-classification-dataset">WebSite</a>)
 - mildlyoverfitted, Vision Transformer in PyTorch (<a href="https://www.youtube.com/watch?v=ovB0ddFtzzA">YouTube</a>)
