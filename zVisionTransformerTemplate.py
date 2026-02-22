@@ -42,12 +42,12 @@ class Attention(torch.nn.Module):
         #qkv: query, key, value
         super().__init__()
         self.inputDim      = inputDim
-        self.qkv_number    = 3
+        self.qkvN          = 3
         self.attnHeadN     = attnHeadN
         self.attnHeadDim   = math.floor(inputDim/self.attnHeadN)
         self.attnHeadScale = pow(self.attnHeadDim, -0.5)
 
-        self.qkvLin        = torch.nn.Linear(inputDim, inputDim*self.qkv_number, bias=qkvBias)
+        self.qkvLin        = torch.nn.Linear(inputDim, inputDim*self.qkvN, bias=qkvBias)
         self.attnDropout   = torch.nn.Dropout(attnDropProb)
         self.outputLin     = torch.nn.Linear(inputDim, inputDim)
         self.outputDropOut = torch.nn.Dropout(outputDropProb)
@@ -57,11 +57,11 @@ class Attention(torch.nn.Module):
             raise ValueError("attention.forward(): input dimension mismatch")
         # input: (sampleN, patchN+1, inputDim)
         qkv = self.qkvLin(x)
-        # => (sampleN, patchN+1, inputDim * qkv_number)
-        qkv = qkv.reshape(sampleN, tokenN, self.qkv_number, self.attnHeadN, self.attnHeadDim)
-        # => (sampleN, patchN+1, qkv_number, attnHeadN, attnHeadDim)
+        # => (sampleN, patchN+1, inputDim * qkvN)
+        qkv = qkv.reshape(sampleN, tokenN, self.qkvN, self.attnHeadN, self.attnHeadDim)
+        # => (sampleN, patchN+1, qkvN, attnHeadN, attnHeadDim)
         qkv = qkv.permute(2, 0, 3, 1, 4)
-        # => (qkv_number, sampleN, attnHeadN, patchN+1, attnHeadDim)
+        # => (qkvN, sampleN, attnHeadN, patchN+1, attnHeadDim)
         query, key, value = qkv[0], qkv[1], qkv[2]
         key = key.transpose(-2, -1) 
         # => (sampleN, attnHeadN, attnHeadDim, patchN+1)
@@ -82,6 +82,7 @@ class Attention(torch.nn.Module):
         return x
 class MultilayerPerceptron(torch.nn.Module):
     def __init__(self, inputFeatureN, hiddenFeatureN, outputFeatureN, dropoutProb=0.0):
+        # mlp: multilayer perceptron
         super().__init__()
         self.layerSquence = torch.nn.Sequential(\
             torch.nn.Linear(inputFeatureN, hiddenFeatureN),\
@@ -95,7 +96,6 @@ class MultilayerPerceptron(torch.nn.Module):
         x = self.layerSquence(x)
         # => (sampleN, patchN+1, outputFeatureN)
         return x
-
 class Block(torch.nn.Module):
     def __init__(self, inputDim, attnHeadN, qkvBias=True, mlpRatio=4.0, attnDropProb=0.0, outputDropProb=0.0):
         super().__init__()
@@ -106,41 +106,43 @@ class Block(torch.nn.Module):
         self.mlp   = MultilayerPerceptron(inputDim, int(inputDim*mlpRatio), inputDim)
     def forward(self, x):
         # input: (sampleN, patchN+1, inputDim)
-        x = x + self.attn(self.norm1(x))
-        x = x + self.mlp( self.norm2(x))
+        x = x + self.attn(self.norm1(x))                    # summation pattern as residual connection, which
+        x = x + self.mlp( self.norm2(x))                    # does not include position embedding for ViT
         # => (sampleN, patchN+1, inputDim)
         return x
-class modelObj(torch.nn.Module):
+class modelObj_(torch.nn.Module):
     def __init__(self,\
                  inputDim=384,\
                  channelN=3,\
-                 classN=10,\
                  patchDim=16,\
                  embedDim=768,\
-                 blockDepth=12,\
+                 clsN=10,\
+                 
                  attnHeadN=12,\
                  qkvBias=True,\
                  mlpRatio=4.0,\
                  attnDropProb=0.0,\
-                 outputDropProb=0.0):
+                 outputDropProb=0.0,\
+                 blockDepth=12):
+        # cls: output class
         super().__init__()
         self.patchEmbed = PatchEmbedding(inputDim, channelN, patchDim, embedDim)
-        self.classToken = torch.nn.Parameter(torch.zeros(1, 1, embedDim))
-        torch.nn.init.trunc_normal_(self.classToken, std=0.02)
-        self.posEmbed   = torch.nn.Parameter(torch.zeros(1, 1+self.patchEmbed.patchN, embedDim))
+        self.clsToken = torch.nn.Parameter(torch.zeros(1, 1, embedDim))
+        torch.nn.init.trunc_normal_(self.clsToken, std=0.02)
+        self.posEmbed = torch.nn.Parameter(torch.zeros(1, 1+self.patchEmbed.patchN, embedDim))
         torch.nn.init.trunc_normal_(self.posEmbed, std=0.02)
-        self.posDrop    = torch.nn.Dropout(outputDropProb)
-        self.blocks     = torch.nn.ModuleList([Block(embedDim, attnHeadN, qkvBias, mlpRatio,\
-                                                     attnDropProb, outputDropProb)
-                                               for _ in range(blockDepth)])
+        self.posDrop = torch.nn.Dropout(outputDropProb)
+        self.blocks = torch.nn.ModuleList([Block(embedDim, attnHeadN, qkvBias, mlpRatio,\
+                                                 attnDropProb, outputDropProb)
+                                           for _ in range(blockDepth)])
         self.norm = torch.nn.LayerNorm(embedDim, eps=1.0E-6)                           
-        self.head = torch.nn.Linear(embedDim, classN)
+        self.clsHead = torch.nn.Linear(embedDim, clsN)
     def forward(self, x):
         # input: (sampleN, channelN, inputDim, inputDim)
         sampleN = x.shape[0]
         x = self.patchEmbed(x)
         # => (sampleN, patchN, embedDim)
-        token = self.classToken.expand(sampleN, -1, -1)
+        token = self.clsToken.expand(sampleN, -1, -1)
         x = torch.cat((token, x), dim=1)
         # => (sampleN, patchN+1, embedDim)
         x = x + self.posEmbed
@@ -151,9 +153,45 @@ class modelObj(torch.nn.Module):
         x = self.norm(x)
         # => (sampleN, patchN+1, embedDim)
         token = x[:, 0]
-        x = self.head(token)
-        # => (sampleN, patchN+1, classN)
+        x = self.clsHead(token)
+        # => (sampleN, patchN+1, clsN)
         return x
+###############################################################################################################
+from vit_pytorch import ViT
+class modelObj(torch.nn.Module):    #cls: output class
+    def __init__(self,\
+                 inputDim=384,\
+                 channelN=3,\
+                 patchDim=16,\
+                 embedDim=768,\
+                 clsN=10,\
+
+                 attnHeadN=12,\
+                 qkvBias=True,\
+                 mlpRatio=4.0,\
+                 attnDropProb=0.0,\
+                 outputDropProb=0.0,\
+                 blockDepth=12):
+        super().__init__()
+        if qkvBias == False:
+            warnings.warn("modelObj(): vit_pytorch assumes qkvBias == True", Warning)      
+        self.vit = ViT(\
+            image_size=inputDim,\
+            channels=3,\
+            patch_size=patchDim,\
+            dim=embedDim,\
+            num_classes=clsN,\
+            
+            heads=attnHeadN,\
+            mlp_dim=int(inputDim*mlpRatio),\
+            dropout=attnDropProb,\
+            emb_dropout=outputDropProb,\
+            depth=blockDepth,\
+            
+            pool='cls')
+    def forward(self, x):
+        return self.vit(x)
+
 ###############################################################################################################
 def get_parN(module):
     return np.sum([par.numel() for par in module.parameters() if par.requires_grad])
@@ -164,15 +202,22 @@ def is_tensor_same(tensor1, tensor2):
 ###############################################################################################################
 def main():
     deviceName = GPUNAME
-    epochN     = 23
-    batchSize  = 100
-    learnRate  = 0.001
+    epochN     = 100
+    batchSize  = 256
+    learnRate  = 0.0001
     randomSeed = 11 
 
     lossFunction = torch.nn.CrossEntropyLoss()
-    optimizerObj = lambda inputPars: torch.optim.Adam(inputPars, lr=learnRate)
-    schedulerObj = None#lambda inputOpt, lastEpoch:\
-#        torch.optim.lr_scheduler.StepLR(inputOpt, last_epoch=lastEpoch, step_size=2, gamma=0.8)
+    optimizerObj = lambda inputPars: torch.optim.AdamW(inputPars, lr=learnRate, weight_decay=0.05)
+    def schedulerObj(inputOpt, lastEpoch):
+        warmup_epochs = 10
+        main_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(\
+            inputOpt, T_max=(epochN - warmup_epochs), eta_min=1e-6)
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(\
+            inputOpt, start_factor=0.1, end_factor=1.0, total_iters=warmup_epochs)
+        return torch.optim.lr_scheduler.SequentialLR(
+            inputOpt, schedulers=[warmup_scheduler, main_scheduler], milestones=[warmup_epochs],\
+            last_epoch=lastEpoch)
  
     verbosity   = 2
     printBatchN = 100
@@ -221,15 +266,16 @@ def main():
     device = torch.device(deviceName)       
     model = modelObj(inputDim=imageSize,\
                      channelN=3,\
-                     classN=classN,\
                      patchDim=16,\
                      embedDim=768,\
-                     blockDepth=12,\
+                     clsN=classN,\
+                     
                      attnHeadN=12,\
                      qkvBias=True,\
                      mlpRatio=4.0,\
                      attnDropProb=0.1,\
-                     outputDropProb=0.1)
+                     outputDropProb=0.1,\
+                     blockDepth=12)
     optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
     checkpoint = {'epoch': -1}
     if checkpointLoadPath is not None:
@@ -253,7 +299,7 @@ def main():
     if schedulerObj is not None:
         scheduler = schedulerObj(optimizer, -1 if (checkpoint['epoch'] == -1) else checkpoint['epoch'] + 1)
     batchTotalN = len(trainLoader)
-    scaler = torch.cuda.amp.GradScaler(enabled=(GPUNAME == 'cuda'))
+    scaler = torch.amp.GradScaler("cuda", enabled=(GPUNAME == 'cuda'))
     for epoch in range(checkpoint['epoch']+1, epochN):
         model.train()
         correctN, sampleN, lossTot = 0, 0, 0
@@ -261,11 +307,11 @@ def main():
             samples = dataIter[0].to(device, non_blocking=True)
             labels  = dataIter[1].to(device, non_blocking=True)
             ### forward
-            with torch.cuda.amp.autocast(enabled=(GPUNAME == 'cuda')):
+            with torch.amp.autocast("cuda", enabled=(GPUNAME == 'cuda')):
                 outputs = model(samples) 
                 loss    = lossFunction(outputs, labels)
             ### backward
-            optimizer.zero_grad(set_to_none=True)                   #required so that w.grad() is reevaluated every epoch
+            optimizer.zero_grad(set_to_none=True)   #required so that w.grad() is reevaluated every epoch
             #loss.backward()
             #optimizer.step()
             scaler.scale(loss).backward()
@@ -284,7 +330,7 @@ def main():
         checkpoint['epoch']           = epoch
         checkpoint['model_state']     = model.state_dict()
         checkpoint['optimizer_state'] = optimizer.state_dict()
-        if verbosity >= 1: print('accuracy = ', accuracy)
+        if verbosity >= 1: print('  accuracy = ', accuracy)
         if schedulerObj is not None:
             scheduler.step()
             if verbosity >= 2:
