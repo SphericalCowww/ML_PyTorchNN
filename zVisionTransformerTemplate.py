@@ -156,6 +156,12 @@ class modelObj_(torch.nn.Module):
         x = self.clsHead(token)
         # => (sampleN, patchN+1, clsN)
         return x
+def get_parN(module):
+    return np.sum([par.numel() for par in module.parameters() if par.requires_grad])
+def is_tensor_same(tensor1, tensor2):
+    arr1 = tensor1.detach().cpu().numpy()
+    arr2 = tensor2.detach().cpu().numpy()
+    return np.testing.assert_allclose(arr1, arr2)
 ###############################################################################################################
 from vit_pytorch import ViT
 class modelObj(torch.nn.Module):    #cls: output class
@@ -183,7 +189,7 @@ class modelObj(torch.nn.Module):    #cls: output class
             num_classes=clsN,\
             
             heads=attnHeadN,\
-            mlp_dim=int(inputDim*mlpRatio),\
+            mlp_dim=int(embedDim*mlpRatio),\
             dropout=attnDropProb,\
             emb_dropout=outputDropProb,\
             depth=blockDepth,\
@@ -191,19 +197,11 @@ class modelObj(torch.nn.Module):    #cls: output class
             pool='cls')
     def forward(self, x):
         return self.vit(x)
-
-###############################################################################################################
-def get_parN(module):
-    return np.sum([par.numel() for par in module.parameters() if par.requires_grad])
-def is_tensor_same(tensor1, tensor2):
-    arr1 = tensor1.detach().cpu().numpy()
-    arr2 = tensor2.detach().cpu().numpy()
-    return np.testing.assert_allclose(arr1, arr2)
 ###############################################################################################################
 def main():
     deviceName = GPUNAME
     epochN     = 100
-    batchSize  = 256
+    batchSize  = 64
     learnRate  = 0.0001
     randomSeed = 11 
 
@@ -348,10 +346,11 @@ def main():
             for batchIdx, dataIter in enumerate(testLoader):
                 samples     = dataIter[0].to(device)
                 labels      = dataIter[1].to(device)
-                outputs     = model(samples)
-                predictions = torch.max(outputs, 1)[1] 
-                sampleN  += labels.shape[0]
-                correctN += (predictions == labels).sum().item()
+                with torch.amp.autocast("cuda", enabled=(GPUNAME == 'cuda')):
+                    outputs     = model(samples)
+                    predictions = torch.max(outputs, 1)[1] 
+                    sampleN  += labels.shape[0]
+                    correctN += (predictions == labels).sum().item()
         validation = 100.0*(correctN/sampleN)
         if verbosity >= 1: print('  test validation accuracy = ', validation, '%\n')
         if tensorboardWriterPath is not None:
