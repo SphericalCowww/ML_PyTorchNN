@@ -199,7 +199,6 @@ class modelObj(torch.nn.Module):    #cls: output class
         return self.vit(x)
 ###############################################################################################################
 def main():
-    deviceName = GPUNAME
     epochN     = 100
     batchSize  = 64
     learnRate  = 0.0001
@@ -260,8 +259,8 @@ def main():
         print('train mapping:', trainData.class_to_idx)
         print('test mapping :', testData.class_to_idx)
     ### training
-    if verbosity >= 1: print('using device:', deviceName)
-    device = torch.device(deviceName)       
+    if verbosity >= 1: print('using device:', GPUNAME)
+    device = torch.device(GPUNAME)       
     model = modelObj(inputDim=imageSize,\
                      channelN=3,\
                      patchDim=16,\
