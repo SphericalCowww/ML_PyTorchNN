@@ -14,7 +14,9 @@
     conda install -c nvidia cuda-toolkit
     which nvcc
     nvcc --version
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128     python
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cuXXX
+    # where XXX is for the most current cuda version
+    python
     >>> import torch
     >>> print("CUDA available:", torch.cuda.is_available())
     >>> print("PyTorch CUDA version:", torch.version.cuda)
