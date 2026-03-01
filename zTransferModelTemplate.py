@@ -31,6 +31,19 @@ def modelObj(inputSize, classN):    # note: this is not a class
 
     features = model.fc.in_features
     model.fc = torch.nn.Linear(features, classN)    #automatically set this layer's par.requires_grad = True
+
+    ###LoRA, improves efficiency for fine tuning
+    from peft import LoraConfig, get_peft_model
+    config = LoraConfig(
+        r=8, 
+        lora_alpha=16, 
+        target_modules=["fc"], 
+        lora_dropout=0.1, 
+        bias="none")
+    model = get_peft_model(model, config)
+    model.print_trainable_parameters() 
+    ###
+
     return model
 RESNET_MEAN = np.array([0.485, 0.456, 0.406])
 RESNET_STD  = np.array([0.229, 0.224, 0.225])

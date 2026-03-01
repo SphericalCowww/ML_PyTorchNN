@@ -199,7 +199,7 @@ class modelObj(torch.nn.Module):    #cls: output class
         return self.vit(x)
 ###############################################################################################################
 def main():
-    epochN     = 100
+    epochN     = 110
     batchSize  = 64
     learnRate  = 0.0001
     randomSeed = 11 
