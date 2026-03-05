@@ -183,7 +183,7 @@ class modelObj(torch.nn.Module):    #cls: output class
             warnings.warn("modelObj(): vit_pytorch assumes qkvBias == True", Warning)      
         self.vit = ViT(\
             image_size=inputDim,\
-            channels=3,\
+            channels=channelN,\
             patch_size=patchDim,\
             dim=embedDim,\
             num_classes=clsN,\
@@ -197,6 +197,13 @@ class modelObj(torch.nn.Module):    #cls: output class
             pool='cls')
     def forward(self, x):
         return self.vit(x)
+###############################################################################################################
+def get_parN(module):
+    return np.sum([par.numel() for par in module.parameters() if par.requires_grad])
+def is_tensor_same(tensor1, tensor2):
+    arr1 = tensor1.detach().cpu().numpy()
+    arr2 = tensor2.detach().cpu().numpy()
+    return np.testing.assert_allclose(arr1, arr2)
 ###############################################################################################################
 def main():
     epochN     = 110
