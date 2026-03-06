@@ -144,8 +144,6 @@ def main():
         model.eval()
         correctN, sampleN = 0, 0
         with torch.no_grad():
-            figureDir = tensorboardWriterPath + '_testPlots_epoch' + str(epoch)
-            pathlib.Path(figureDir).mkdir(parents=True, exist_ok=True)
             for batchIdx, dataIter in enumerate(testLoader):
                 samples     = dataIter[0].to(device)
                 labels      = dataIter[1].to(device)
@@ -162,6 +160,8 @@ def main():
             tensorboardWriter.add_scalar('validation', validation, epoch)
             tensorboardWriter.flush()
             tensorboardWriter.close()
+    #############################################################
+    ### evaluating
     model.eval()
     correctN, sampleN = 0, 0
     with torch.no_grad():
@@ -174,7 +174,7 @@ def main():
             predictions = torch.max(outputs, 1)[1]
             sampleN  += labels.shape[0]
             correctN += (predictions == labels).sum().item()
-            if batchIdx < plotTestBatchN:
+            if (batchIdx < plotTestBatchN) or (len(testLoader)-plotTestBatchN < batchIdx):
                 for sampleIdx in range(len(samples)): 
                     if plotTestSampleNperBatch <= sampleIdx: break
                     figureName = figureDir + '/testPlot_batch' + str(batchIdx) +'_sample'+str(sampleIdx)+'.png'

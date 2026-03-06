@@ -100,6 +100,7 @@ def main():
         print('classN   :', classN)
         print('train mapping:', trainData.class_to_idx)
         print('test mapping :', testData.class_to_idx)
+    #############################################################
     ### training
     if verbosity >= 1: 
         print('using device:', deviceName)
@@ -186,6 +187,8 @@ def main():
             tensorboardWriter.add_scalar('validation', validation, epoch)
             tensorboardWriter.flush()
             tensorboardWriter.close()
+    #############################################################
+    ### evaluating
     model.eval()
     correctN, sampleN = 0, 0
     with torch.no_grad():
@@ -198,7 +201,7 @@ def main():
             predictions = torch.max(outputs, 1)[1]
             sampleN  += labels.shape[0]
             correctN += (predictions == labels).sum().item()
-            if batchIdx < plotTestBatchN:
+            if (batchIdx < plotTestBatchN) or (len(testLoader)-plotTestBatchN < batchIdx):
                 for sampleIdx in range(len(samples)): 
                     if plotTestSampleNperBatch <= sampleIdx: break
                     figureName = figureDir + '/testPlot_batch' + str(batchIdx) +'_sample'+str(sampleIdx)+'.png'

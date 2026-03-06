@@ -211,7 +211,7 @@ def main():
     verbosity  = 2
     randomSeed = 11
 
-    epochN     = 110
+    epochN     = 100
     batchSize  = 64
     learningRate  = 0.0001
 
@@ -269,13 +269,16 @@ def main():
     checkpointLoadPath    = 'yVisionTransformerTemplate/model1.pth'
     checkpointSavePath    = 'yVisionTransformerTemplate/model1.pth'
     tensorboardWriterPath = 'yVisionTransformerTemplate/model1'
-    wandbObj = wandb.init(entity='tinglin194-universit-t-m-nster',
-                          project='yVisionTransformerTemplate',
-                          config={'learningRate': learningRate,
-                                  'architecture': 'ViT',
-                                  'randomSeed':   randomSeed, 
-                                  'batchSize':    batchSize,
-                                  'dataset':      dataDir,
+    wandbObj = wandb.init(entity='tinglin194-universit-t-m-nster',\
+                          project='yVisionTransformerTemplate',\
+                          dir='yVisionTransformerTemplate/wandbLog',\
+                          id='model1',\
+                          resume='allow',\
+                          config={'learningRate': learningRate,\
+                                  'architecture': 'ViT',\
+                                  'randomSeed':   randomSeed,\
+                                  'batchSize':    batchSize,\
+                                  'dataset':      dataDir,\
                                   'inputSize':    imageSize,},)
     #############################################################
     ### training
@@ -360,8 +363,6 @@ def main():
         model.eval()
         correctN, sampleN = 0, 0
         with torch.no_grad():
-            figureDir = tensorboardWriterPath + '_testPlots_epoch' + str(epoch)
-            pathlib.Path(figureDir).mkdir(parents=True, exist_ok=True)
             for batchIdx, dataIter in enumerate(testLoader):
                 samples     = dataIter[0].to(device)
                 labels      = dataIter[1].to(device)
@@ -399,7 +400,7 @@ def main():
             predictions = torch.max(outputs, 1)[1]
             sampleN  += labels.shape[0]
             correctN += (predictions == labels).sum().item()
-            if batchIdx < plotTestBatchN:
+            if (batchIdx < plotTestBatchN) or (len(testLoader)-plotTestBatchN < batchIdx):
                 for sampleIdx in range(len(samples)): 
                     if plotTestSampleNperBatch <= sampleIdx: break
                     figureName = figureDir + '/testPlot_batch' + str(batchIdx) +'_sample'+str(sampleIdx)+'.png'
