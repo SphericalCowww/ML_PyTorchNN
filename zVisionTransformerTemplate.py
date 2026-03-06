@@ -17,6 +17,8 @@ from tqdm import tqdm
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter   #tensorboard --logdir ...
+import wandb
+
 GPUNAME = 'cpu'
 if torch.cuda.is_available()         == True: GPUNAME = 'cuda'
 if torch.backends.mps.is_available() == True: GPUNAME = 'mps'
@@ -54,7 +56,7 @@ class Attention(torch.nn.Module):
     def forward(self, x):
         sampleN, tokenN, inputDim = x.shape
         if inputDim != self.inputDim:
-            raise ValueError("attention.forward(): input dimension mismatch")
+            raise ValueError('attention.forward(): input dimension mismatch')
         # input: (sampleN, patchN+1, inputDim)
         qkv = self.qkvLin(x)
         # => (sampleN, patchN+1, inputDim * qkvN)
@@ -180,7 +182,7 @@ class modelObj(torch.nn.Module):    #cls: output class
                  blockDepth=12):
         super().__init__()
         if qkvBias == False:
-            warnings.warn("modelObj(): vit_pytorch assumes qkvBias == True", Warning)      
+            warnings.warn('modelObj(): vit_pytorch assumes qkvBias == True', Warning)      
         self.vit = ViT(\
             image_size=inputDim,\
             channels=channelN,\
@@ -206,13 +208,15 @@ def is_tensor_same(tensor1, tensor2):
     return np.testing.assert_allclose(arr1, arr2)
 ###############################################################################################################
 def main():
+    verbosity  = 2
+    randomSeed = 11
+
     epochN     = 110
     batchSize  = 64
-    learnRate  = 0.0001
-    randomSeed = 11 
+    learningRate  = 0.0001
 
     lossFunction = torch.nn.CrossEntropyLoss()
-    optimizerObj = lambda inputPars: torch.optim.AdamW(inputPars, lr=learnRate, weight_decay=0.05)
+    optimizerObj = lambda inputPars: torch.optim.AdamW(inputPars, lr=learningRate, weight_decay=0.05)
     def schedulerObj(inputOpt, lastEpoch):
         warmup_epochs = 10
         main_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(\
@@ -222,15 +226,6 @@ def main():
         return torch.optim.lr_scheduler.SequentialLR(
             inputOpt, schedulers=[warmup_scheduler, main_scheduler], milestones=[warmup_epochs],\
             last_epoch=lastEpoch)
- 
-    verbosity   = 2
-    printBatchN = 100
-    pathlib.Path('yVisionTransformerTemplate').mkdir(parents=True, exist_ok=True)
-    checkpointLoadPath    = 'yVisionTransformerTemplate/model1.pth'
-    checkpointSavePath    = 'yVisionTransformerTemplate/model1.pth'
-    tensorboardWriterPath = 'yVisionTransformerTemplate/model1'
-    plotTestBatchN          = 10
-    plotTestSampleNperBatch = 10
     #############################################################
     ### loading data
     torch.manual_seed(randomSeed)
@@ -265,6 +260,24 @@ def main():
         print('classN   :', classN)
         print('train mapping:', trainData.class_to_idx)
         print('test mapping :', testData.class_to_idx)
+    #############################################################
+    ### monitoring
+    printBatchN             = 100
+    plotTestBatchN          = 10
+    plotTestSampleNperBatch = 10
+    pathlib.Path('yVisionTransformerTemplate').mkdir(parents=True, exist_ok=True)
+    checkpointLoadPath    = 'yVisionTransformerTemplate/model1.pth'
+    checkpointSavePath    = 'yVisionTransformerTemplate/model1.pth'
+    tensorboardWriterPath = 'yVisionTransformerTemplate/model1'
+    wandbObj = wandb.init(entity='tinglin194-universit-t-m-nster',
+                          project='yVisionTransformerTemplate',
+                          config={'learningRate': learningRate,
+                                  'architecture': 'ViT',
+                                  'randomSeed':   randomSeed, 
+                                  'batchSize':    batchSize,
+                                  'dataset':      dataDir,
+                                  'inputSize':    imageSize,},)
+    #############################################################
     ### training
     if verbosity >= 1: print('using device:', GPUNAME)
     device = torch.device(GPUNAME)       
@@ -303,7 +316,7 @@ def main():
     if schedulerObj is not None:
         scheduler = schedulerObj(optimizer, -1 if (checkpoint['epoch'] == -1) else checkpoint['epoch'] + 1)
     batchTotalN = len(trainLoader)
-    scaler = torch.amp.GradScaler("cuda", enabled=(GPUNAME == 'cuda'))
+    scaler = torch.amp.GradScaler('cuda', enabled=(GPUNAME == 'cuda'))
     for epoch in range(checkpoint['epoch']+1, epochN):
         model.train()
         correctN, sampleN, lossTot = 0, 0, 0
@@ -311,7 +324,7 @@ def main():
             samples = dataIter[0].to(device, non_blocking=True)
             labels  = dataIter[1].to(device, non_blocking=True)
             ### forward
-            with torch.amp.autocast("cuda", enabled=(GPUNAME == 'cuda')):
+            with torch.amp.autocast('cuda', enabled=(GPUNAME == 'cuda')):
                 outputs = model(samples) 
                 loss    = lossFunction(outputs, labels)
             ### backward
@@ -352,7 +365,7 @@ def main():
             for batchIdx, dataIter in enumerate(testLoader):
                 samples     = dataIter[0].to(device)
                 labels      = dataIter[1].to(device)
-                with torch.amp.autocast("cuda", enabled=(GPUNAME == 'cuda')):
+                with torch.amp.autocast('cuda', enabled=(GPUNAME == 'cuda')):
                     outputs     = model(samples)
                     predictions = torch.max(outputs, 1)[1] 
                     sampleN  += labels.shape[0]
@@ -367,6 +380,13 @@ def main():
             tensorboardWriter.add_scalar('validation', validation,               epoch)
             tensorboardWriter.flush()
             tensorboardWriter.close()
+            wandbObj.log({'loss_tot':   lossTot,\
+                          'loss_train': lossTot/len(trainLoader),\
+                          'accuracy':   accuracy,\
+                          'validation': validation,})
+    wandbObj.finish()
+    #############################################################
+    ### evaluating
     model.eval()
     correctN, sampleN = 0, 0
     with torch.no_grad():
