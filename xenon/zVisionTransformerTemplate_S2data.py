@@ -106,16 +106,21 @@ class pickleData_2Darrays(Dataset):
             img = self.transform(img)
         return img, label
 class S2DataTransform:
-    def __init__(self, mean, std):
-        self.mean = mean
-        self.std  = std
+    def __init__(self, PMTstds):
+        self.PMTstds = PMTstds
+        if not isinstance(self.PMTstds, torch.Tensor):
+            self.PMTstds = torch.from_numpy(self.PMTstds).float().view(1, 1, -1)
     def __call__(self, img):
-        img = torch.from_numpy(img).float()
+        if not isinstance(img, torch.Tensor):
+            img = torch.from_numpy(img).float()
+        ### normalization
         if img.ndim == 2:
-            img = img.unsqueeze(0) # [1, PMT, time]
-        img = torch.log1p(img)
-        img = (img - self.mean) / (self.std + 1e-6)
-        img = img + torch.randn_like(img) * (self.std/10.0)
+            img = img.unsqueeze(0) # [1, time, PMT]
+        img = torch.log1p(torch.clamp(img, min=0))
+        img = img/(self.PMTstds + 1e-6)
+        img = torch.clamp(img, 0, 10)
+        ### argumentation
+        # img = img + torch.randn_like(img) * (self.PMTstds/10.0)
         return img
 ###############################################################################################################
 def main():
@@ -138,19 +143,20 @@ def main():
             inputOpt, schedulers=[warmup_scheduler, main_scheduler], milestones=[warmup_epochs],\
             last_epoch=lastEpoch)
     #############################################################
-    ### loading data
+    ### loading data    
     torch.manual_seed(randomSeed)
     dataDir   = os.path.expanduser('~/fuse/dataset/S2data/')
     imageSize = 512
-    imageMean = 0.0
-    imageSTD  = 0.5
+    imageSTD  = 0.0
+    with open(dataDir+'Kr83m_sim_sample__10000_s2_data_long_per_channel_0pad_PMTstds.pkl', 'rb') as pickleFile:
+        imageSTD = pickle.load(pickleFile)
     classes = ['Kr83m', 'fake']
     trainData = pickleData_2Darrays(dataDir+'Kr83m_sim_sample__10000_s2_data_long_per_channel_0pad.pkl', 
                                     dataDir+'fake_event_sim_sample__10001_s2_data_long_per_channel_0pad.pkl', 
-                                    class_names=classes,transform=S2DataTransform(mean=imageMean,std=imageSTD))
+                                    class_names=classes,transform=S2DataTransform(PMTstds=imageSTD))
     testData  = pickleData_2Darrays(dataDir+'Kr83m_sim_sample__1000_s2_data_long_per_channel_0pad.pkl',  
                                     dataDir+'fake_event_sim_sample__1001_s2_data_long_per_channel_0pad.pkl',  
-                                    class_names=classes,transform=S2DataTransform(mean=imageMean,std=imageSTD))
+                                    class_names=classes,transform=S2DataTransform(PMTstds=imageSTD))
     loaderArgs = {'batch_size': batchSize}
     if GPUNAME == 'cuda':
         loaderArgs = {'batch_size': batchSize, 'num_workers': 8, 'pin_memory': True}
@@ -170,13 +176,14 @@ def main():
     plotTestBatchN          = 10
     plotTestSampleNperBatch = 10
     pathlib.Path('yVisionTransformerTemplate').mkdir(parents=True, exist_ok=True)
-    checkpointLoadPath    = 'yVisionTransformerTemplate_S2data/model1.pth'
-    checkpointSavePath    = 'yVisionTransformerTemplate_S2data/model1.pth'
-    tensorboardWriterPath = 'yVisionTransformerTemplate_S2data/model1'
+    modelName = datetime.datetime.now().strftime('%y%m%d_%H%M%S')+'model_S2data'
+    checkpointLoadPath    = 'yVisionTransformerTemplate_S2data/' + modelName + '.pth'
+    checkpointSavePath    = 'yVisionTransformerTemplate_S2data/' + modelName + '.pth'
+    tensorboardWriterPath = 'yVisionTransformerTemplate_S2data/' + modelName
     wandbObj = wandb.init(entity='tinglin194-universit-t-m-nster',\
                           project='yVisionTransformerTemplate',\
                           dir='yVisionTransformerTemplate_S2data/wandbLog',\
-                          id=datetime.datetime.now().strftime("%y%m%d_%H%M%S")+'model_S2data',\
+                          id=modelName,\
                           resume='allow',\
                           config={'learningRate': learningRate,\
                                   'architecture': 'ViT',\
