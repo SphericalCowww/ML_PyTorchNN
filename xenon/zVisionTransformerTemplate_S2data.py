@@ -4,14 +4,6 @@ def warning_on_one_line(message, category, filename, lineno, file=None, line=Non
     return '%s: %s: %s: %s\n' % (filename, lineno, category.__name__, message)
 warnings.formatwarning = warning_on_one_line
 warnings.filterwarnings('ignore', category=DeprecationWarning)
-import matplotlib
-import matplotlib.pyplot as plt
-from matplotlib import gridspec
-from matplotlib import patches
-from matplotlib.colors import LogNorm
-import matplotlib.ticker as mticker
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from PIL import Image
 import numpy as np
 import pickle
 from tqdm import tqdm
@@ -55,7 +47,7 @@ class modelObj(torch.nn.Module):    #cls: output class
             emb_dropout=outputDropProb,\
             depth=blockDepth,\
             
-            pool='cls')
+            pool='mean')
     def forward(self, x):
         return self.vit(x)
 
@@ -88,15 +80,30 @@ class MultiHeadViT(torch.nn.Module):
 ###############################################################################################################
 from torch.utils.data import Dataset
 class pickleData_2Darrays(Dataset):
-    def __init__(self, file1, file2, class_names=['class1', 'class2'], transform=None):
-        with open(file1, 'rb') as inputFile:
-            self.data1 = pickle.load(inputFile) 
-        with open(file2, 'rb') as inputFile:
-            self.data2 = pickle.load(inputFile)
-        self.labels = np.concatenate([[0]*len(self.data1), [1]*len(self.data2)])
-        self.data   = np.concatenate([self.data1, self.data2], axis=0)
+    def __init__(self, file_path1, file_path2, class_names=['class1', 'class2'], ratio_range=[0.0, 1.0], 
+                 rand_seed=0, transform=None):
+        if (0.0 <= ratio_range[0] < ratio_range[1] <= 1.0) is False:
+            raise AssertionError("pickleData_2Darrays(): invalid ratio_range") 
+        data1, data2 = None, None
+        with open(file_path1, 'rb') as inputFile:
+            data1 = pickle.load(inputFile) 
+        with open(file_path2, 'rb') as inputFile:
+            data2 = pickle.load(inputFile)
+        dataComb  = np.concatenate([data1, data2], axis=0)
+        labelComb = np.concatenate([[0]*len(data1), [1]*len(data2)])
+        
+        idxShuffle = np.arange(len(dataComb))
+        np.random.seed(rand_seed) 
+        np.random.shuffle(idxShuffle)
+        dataComb  = dataComb [idxShuffle]
+        labelComb = labelComb[idxShuffle]
+
+        idxStart = int(ratio_range[0]*len(dataComb))
+        idxEnd   = int(ratio_range[1]*len(dataComb))
+        self.data         = dataComb[ int(ratio_range[0]*len(dataComb)):int(ratio_range[1]*len(dataComb))]
+        self.labels       = labelComb[int(ratio_range[0]*len(dataComb)):int(ratio_range[1]*len(dataComb))]
         self.class_to_idx = {class_names[0]: 0, class_names[1]: 1}
-        self.transform = transform
+        self.transform    = transform
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
@@ -106,8 +113,15 @@ class pickleData_2Darrays(Dataset):
             img = self.transform(img)
         return img, label
 class S2DataTransform:
-    def __init__(self, PMTstds):
-        self.PMTstds = PMTstds
+    def __init__(self, PMTstds, ampThres=0.01, is_training=True,
+                 amp_argm_level=0.1, gain_argm_level=0.01, width_argm_level=0.01, shift_argm_level=16):
+        self.PMTstds     = PMTstds
+        self.ampThres    = ampThres
+        self.is_training = is_training
+        self.amp_argm_level   = amp_argm_level
+        self.gain_argm_level  = gain_argm_level
+        self.width_argm_level = width_argm_level
+        self.shift_argm_level = shift_argm_level
         if not isinstance(self.PMTstds, torch.Tensor):
             self.PMTstds = torch.from_numpy(self.PMTstds).float().view(1, 1, -1)
     def __call__(self, img):
@@ -116,11 +130,38 @@ class S2DataTransform:
         ### normalization
         if img.ndim == 2:
             img = img.unsqueeze(0) # [1, time, PMT]
+        img[img < self.ampThres] = 0
         img = torch.log1p(torch.clamp(img, min=0))
         img = img/(self.PMTstds + 1e-6)
+        ### argumentations
+        if self.is_training is True:
+            ### argumentation: amp
+            amp_argm = torch.randn_like(img)*self.amp_argm_level*img
+            zero_mask = (img > 0).float()
+            img = img + amp_argm*zero_mask
+            ### argumentation: gain 
+            gain_argm = 1.0 + torch.randn(1).item()*self.gain_argm_level
+            img = img*gain_argm
+            ### argumentation: width
+            width_argm = 1.0 + torch.randn(1).item()*self.width_argm_level
+            width_argm = max(0.8, min(1.2, width_argm))
+            width_orig = img.shape[1]
+            width_new  = int(width_argm*width_orig)
+            img = img.unsqueeze(0) 
+            img = torch.nn.functional.interpolate(img, size=(width_new, img.shape[-1]), mode='bilinear', align_corners=False)
+            img = img.squeeze(0)
+            if width_new > width_orig:
+                bin_start = (width_new - width_orig) // 2
+                img = img[:, bin_start:bin_start+width_orig, :]
+            elif width_new < width_orig:
+                pad_left  = (width_orig - width_new) // 2
+                pad_right = (width_orig - width_new) - pad_left
+                img = torch.nn.functional.pad(img, (0, 0, pad_left, pad_right))
+            ### argumentation: shift
+            shift_argm = np.random.randint(-self.shift_argm_level, self.shift_argm_level)
+            img = torch.roll(img, shifts=shift_argm, dims=1)
+        ### limit
         img = torch.clamp(img, 0, 10)
-        ### argumentation
-        # img = img + torch.randn_like(img) * (self.PMTstds/10.0)
         return img
 ###############################################################################################################
 def main():
@@ -129,7 +170,7 @@ def main():
 
     epochN     = 100
     batchSize  = 64
-    learningRate  = 0.0001
+    learningRate  = 0.0005
 
     lossFunction = torch.nn.CrossEntropyLoss()
     optimizerObj = lambda inputPars: torch.optim.AdamW(inputPars, lr=learningRate, weight_decay=0.05)
@@ -145,31 +186,29 @@ def main():
     #############################################################
     ### loading data    
     torch.manual_seed(randomSeed)
-    dataDir   = os.path.expanduser('~/fuse/dataset/S2data/')
-    imageSize = 512
-    imageSTD  = 0.0
+    dataDir     = os.path.expanduser('~/fuse/dataset/S2data/')
     with open(dataDir+'Kr83m_sim_sample__10000_s2_data_long_per_channel_0pad_PMTstds.pkl', 'rb') as pickleFile:
         imageSTD = pickle.load(pickleFile)
     classes = ['Kr83m', 'fake']
     trainData = pickleData_2Darrays(dataDir+'Kr83m_sim_sample__10000_s2_data_long_per_channel_0pad.pkl', 
                                     dataDir+'fake_event_sim_sample__10001_s2_data_long_per_channel_0pad.pkl', 
-                                    class_names=classes,transform=S2DataTransform(PMTstds=imageSTD))
-    testData  = pickleData_2Darrays(dataDir+'Kr83m_sim_sample__1000_s2_data_long_per_channel_0pad.pkl',  
-                                    dataDir+'fake_event_sim_sample__1001_s2_data_long_per_channel_0pad.pkl',  
-                                    class_names=classes,transform=S2DataTransform(PMTstds=imageSTD))
+                                    class_names=classes, ratio_range=[0.0, 0.9], rand_seed=randomSeed,
+                                    transform=S2DataTransform(PMTstds=imageSTD, is_training=True))
+    testData  = pickleData_2Darrays(dataDir+'Kr83m_sim_sample__10000_s2_data_long_per_channel_0pad.pkl',  
+                                    dataDir+'fake_event_sim_sample__10001_s2_data_long_per_channel_0pad.pkl',  
+                                    class_names=classes, ratio_range=[0.9, 1.0], rand_seed=randomSeed,
+                                    transform=S2DataTransform(PMTstds=imageSTD, is_training=False))
     loaderArgs = {'batch_size': batchSize}
     if GPUNAME == 'cuda':
         loaderArgs = {'batch_size': batchSize, 'num_workers': 8, 'pin_memory': True}
     trainLoader = torch.utils.data.DataLoader(dataset=trainData, shuffle=True,  **loaderArgs)
     testLoader  = torch.utils.data.DataLoader(dataset=testData,  shuffle=False, **loaderArgs)
-    dataShape = [len(trainData), trainData[0][0].shape[0], trainData[0][0].shape[1]]
-    inputSize = dataShape[1]*dataShape[2]
-    classN    = len(classes)
     if verbosity >= 1:
-        print('dataShape:', dataShape)
-        print('classN   :', classN)
-        print('train mapping:', trainData.class_to_idx)
-        print('test mapping :', testData.class_to_idx)
+        print('train_dataShape:', trainData[0][0].shape)
+        print('test_dataShape :', testData[0][0].shape)
+        print('classN           :', len(classes))
+        print('train mapping    :', trainData.class_to_idx)
+        print('test mapping     :', testData.class_to_idx)
     #############################################################
     ### monitoring
     printBatchN             = 100
@@ -180,32 +219,33 @@ def main():
     checkpointLoadPath    = 'yVisionTransformerTemplate_S2data/' + modelName + '.pth'
     checkpointSavePath    = 'yVisionTransformerTemplate_S2data/' + modelName + '.pth'
     tensorboardWriterPath = 'yVisionTransformerTemplate_S2data/' + modelName
-    wandbObj = wandb.init(entity='tinglin194-universit-t-m-nster',\
-                          project='yVisionTransformerTemplate',\
-                          dir='yVisionTransformerTemplate_S2data/wandbLog',\
-                          id=modelName,\
-                          resume='allow',\
-                          config={'learningRate': learningRate,\
-                                  'architecture': 'ViT',\
-                                  'randomSeed':   randomSeed,\
-                                  'batchSize':    batchSize,\
-                                  'dataset':      dataDir,\
-                                  'inputSize':    imageSize,},)
+    wandbObj = wandb.init(entity='tinglin194-universit-t-m-nster',
+                          project='yVisionTransformerTemplate',
+                          dir='yVisionTransformerTemplate_S2data/wandbLog',
+                          id=modelName,
+                          resume='allow',
+                          config={'train_dataShape': trainData[0][0].shape,
+                                  'test_dataShape':  testData[0][0].shape,
+                                  'learningRate': learningRate,
+                                  'architecture': 'ViT',
+                                  'randomSeed':   randomSeed,
+                                  'batchSize':    batchSize,
+                                  'dataset':      dataDir},)
     #############################################################
     ### training
     if verbosity >= 1: print('using device:', GPUNAME)
     device = torch.device(GPUNAME)       
-    model = modelObj(inputDim=imageSize,\
-                     channelN=1,\
-                     patchDim=16,\
-                     embedDim=384,\
-                     clsN=classN,\
+    model = modelObj(inputDim=trainData[0][0].shape[-1],
+                     channelN=1,
+                     patchDim=16,
+                     embedDim=384,
+                     clsN=len(classes),
                      
-                     attnHeadN=4,\
-                     qkvBias=True,\
-                     mlpRatio=4.0,\
-                     attnDropProb=0.1,\
-                     outputDropProb=0.1,\
+                     attnHeadN=4,
+                     qkvBias=True,
+                     mlpRatio=4.0,
+                     attnDropProb=0.3,
+                     outputDropProb=0.3,
                      blockDepth=6)
     optimizer = optimizerObj(model.parameters())    #Module.parameters() are all parameters to be optimized
     checkpoint = {'epoch': -1}
