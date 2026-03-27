@@ -5,8 +5,9 @@ def warning_on_one_line(message, category, filename, lineno, file=None, line=Non
 warnings.formatwarning = warning_on_one_line
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 import numpy as np
-import pickle
+import pickle, h5py
 import random
+import matplotlib.pyplot as plt
 from tqdm import tqdm
 import torch
 import torchvision
@@ -81,45 +82,90 @@ class MultiHeadViT(torch.nn.Module):
 ###############################################################################################################
 from torch.utils.data import Dataset
 class pickleData_2Darrays(Dataset):
-    def __init__(self, file_path1, file_path2, class_names=['class1', 'class2'], ratio_range=[0.0, 1.0], 
-                 rand_seed=0, transform=None):
+    def __init__(self, file_paths0, file_paths1, class_names=['class1', 'class2'], 
+                 ratio_range=[0.0, 1.0], rand_seed=0, transform=None):
         if (0.0 <= ratio_range[0] < ratio_range[1] <= 1.0) is False:
             raise AssertionError("pickleData_2Darrays(): invalid ratio_range") 
-        data1, data2 = None, None
+        if isinstance(file_paths0, str): file_paths0 = [file_paths0]
+        if isinstance(file_paths1, str): file_paths1 = [file_paths1]
+        
         randGen = np.random.default_rng(rand_seed)
-        torch.manual_seed(rand_seed)
-        torch.cuda.manual_seed_all(rand_seed)
-        torch.backends.cudnn.deterministic = True
-        with open(file_path1, 'rb') as inputFile:
-            data1_ = pickle.load(inputFile)
-            idxShuffle = randGen.permutation(len(data1_))
-            idxShuffle = idxShuffle[int(ratio_range[0]*len(data1_)):int(ratio_range[1]*len(data1_))]
-            data1 = np.asarray([data1_[i] for i in idxShuffle], dtype=np.float32)
-            del data1_
-        with open(file_path2, 'rb') as inputFile:
-            data2_ = pickle.load(inputFile)
-            idxShuffle = randGen.permutation(len(data2_))
-            idxShuffle = idxShuffle[int(ratio_range[0]*len(data2_)):int(ratio_range[1]*len(data2_))]
-            data2 = np.asarray([data2_[i] for i in idxShuffle], dtype=np.float32)
-            del data2_
-        self.data         = np.concatenate([data1, data2], axis=0)
-        self.labels       = np.concatenate([[0]*len(data1), [1]*len(data2)])
+        data1 = self._load_multiple_files(file_paths0, randGen, ratio_range)
+        data2 = self._load_multiple_files(file_paths1, randGen, ratio_range)
+        self.data   = np.concatenate([data1, data2], axis=0)
+        self.labels = np.concatenate([[0]*len(data1), [1]*len(data2)])
         self.class_to_idx = {class_names[0]: 0, class_names[1]: 1}
-        self.transform    = transform
+        self.transform = transform
         del data1, data2
+    def _load_multiple_files(self, paths, randGen, ratio_range):
+        accumulated_data = []
+        for file_path in paths:
+            with open(file_path, 'rb') as inputFile:
+                raw_data = pickle.load(inputFile)
+                sampleN = len(raw_data)
+                shuffleIdx = randGen.permutation(sampleN)
+                shuffleIdx = shuffleIdx[int(ratio_range[0]*sampleN):int(ratio_range[1]*sampleN)]
+                single_data = np.asarray([raw_data[sampleIdx] for sampleIdx in shuffleIdx], dtype=np.float32)
+                del raw_data
+                accumulated_data.append(single_data)
+                del single_data
+        return np.concatenate(accumulated_data, axis=0)
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
-        img   = self.data[idx].astype(np.float32)
+        img   = self.data[idx] 
         label = self.labels[idx]
         if self.transform:
             img = self.transform(img)
         return img, label
+class lazyH5Data_2Darrays(Dataset):
+    def __init__(self, file_paths0, file_paths1, class_names=['class1', 'class2'], 
+                 ratio_range=[0.0, 1.0], rand_seed=0, transform=None):
+        if not (0.0 <= ratio_range[0] < ratio_range[1] <= 1.0):
+            raise AssertionError("LazyH5Data_2Darrays(): invalid ratio_range") 
+        if isinstance(file_paths0, str): file_paths0 = [file_paths0]
+        if isinstance(file_paths1, str): file_paths1 = [file_paths1]
+        
+        self.dataName     = 'waveforms'
+        self.randGen      = np.random.default_rng(rand_seed)
+        self.transform    = transform
+        self.class_to_idx = {class_names[0]: 0, class_names[1]: 1}
+        
+        self.index_map = []
+        self._build_index(file_paths0, label=0, ratio_range=ratio_range)
+        self._build_index(file_paths1, label=1, ratio_range=ratio_range)
+        self.file_handles = {}
+    def _build_index(self, paths, label, ratio_range):
+        for file_path in paths:
+            with h5py.File(file_path, 'r') as inputFile:
+                sampleN = inputFile[self.dataName].shape[0]
+                shuffleIdx = self.randGen.permutation(sampleN)
+                shuffleIdx = shuffleIdx[int(ratio_range[0]*sampleN):int(ratio_range[1]*sampleN)]
+                for sampleIdx in shuffleIdx:
+                    self.index_map.append((file_path, sampleIdx, label))
+    def __len__(self):
+        return len(self.index_map)
+    def __getitem__(self, fileIdx):
+        file_path, sampleIdx, label = self.index_map[fileIdx]
+        if file_path not in self.file_handles:
+            self.file_handles[file_path] = h5py.File(file_path, 'r')
+        file_handle = self.file_handles[file_path]
+        img = file_handle[self.dataName][sampleIdx].astype(np.float32)
+        if self.transform:
+            img = self.transform(img)
+        else:
+            img = torch.from_numpy(img).float()
+            if img.ndim == 2:
+                img = img.unsqueeze(0) # [1, time, PMT]
+        return img, label
+    def __del__(self):
+        for handle in self.file_handles.values():
+            handle.close()
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
-class S2DataTransform:
+class transformS2Data:
     def __init__(self, PMTstds, amp_thres=0.01, is_training=True,
                  amp_aug_level=0.1, gain_aug_level=0.01, width_aug_level=0.01, shift_aug_level=16):
         self.PMTstds     = PMTstds
@@ -195,6 +241,9 @@ def main():
     batchSize  = 64
     learningRate  = 0.0005
 
+    torch.manual_seed(randomSeed)
+    torch.cuda.manual_seed_all(randomSeed)
+    torch.backends.cudnn.deterministic = True
     lossFunction = torch.nn.CrossEntropyLoss()
     optimizerObj = lambda inputPars: torch.optim.AdamW(inputPars, lr=learningRate, weight_decay=0.05)
     def schedulerObj(inputOpt, lastEpoch):
@@ -209,18 +258,20 @@ def main():
     #############################################################
     ### loading data    
     torch.manual_seed(randomSeed)
-    dataDir     = os.path.expanduser('~/fuse/dataset/S2data/')
+    dataDir = os.path.expanduser('/scratch/tmp/ylin3/dataset/S2data/')
     with open(dataDir+'Kr83m_sim_sample__10000_s2_data_long_per_channel_0pad_PMTstds.pkl', 'rb') as pickleFile:
         imageSTD = pickle.load(pickleFile)
     classes = ['Kr83m', 'fake']
-    trainData = pickleData_2Darrays(dataDir+'Kr83m_sim_sample__10000_s2_data_long_per_channel_0pad.pkl', 
-                                    dataDir+'fake_event_sim_sample__10001_s2_data_long_per_channel_0pad.pkl', 
+    trainPaths0 = [dataDir+'Kr83m_10000_s2_data_long_per_channel_0pad_0.h5']
+    testPaths0  = trainPaths0
+    trainPaths1 = [dataDir+'fake_10000_s2_data_long_per_channel_0pad_0.h5']
+    testPaths1  = trainPaths1
+    trainData = lazyH5Data_2Darrays(trainPaths0, trainPaths1,
                                     class_names=classes, ratio_range=[0.0, 0.9], rand_seed=randomSeed,
-                                    transform=S2DataTransform(PMTstds=imageSTD, is_training=True))
-    testData  = pickleData_2Darrays(dataDir+'Kr83m_sim_sample__10000_s2_data_long_per_channel_0pad.pkl',  
-                                    dataDir+'fake_event_sim_sample__10001_s2_data_long_per_channel_0pad.pkl',  
+                                    transform=transformS2Data(PMTstds=imageSTD, is_training=True))
+    testData  = lazyH5Data_2Darrays(testPaths0, testPaths1,
                                     class_names=classes, ratio_range=[0.9, 1.0], rand_seed=randomSeed,
-                                    transform=S2DataTransform(PMTstds=imageSTD, is_training=False))
+                                    transform=transformS2Data(PMTstds=imageSTD, is_training=False))
     loaderArgs = {'batch_size': batchSize}
     if GPUNAME == 'cuda':
         loaderArgs = {'batch_size': batchSize, 'num_workers': 8, 'pin_memory': True}
@@ -229,6 +280,10 @@ def main():
     testLoader  = torch.utils.data.DataLoader(dataset=testData,  shuffle=False, worker_init_fn=seed_worker,
                                               **loaderArgs)
     if verbosity >= 1:
+        print('trainPaths0:', trainPaths0)
+        print('trainPaths1:', trainPaths1)
+        print('testPaths0:', testPaths0)
+        print('testPaths1:', testPaths1)
         print('train_dataShape:', trainData[0][0].shape)
         print('test_dataShape :', testData[0][0].shape)
         print('classN           :', len(classes))
