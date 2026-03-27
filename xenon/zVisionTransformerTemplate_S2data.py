@@ -6,6 +6,7 @@ warnings.formatwarning = warning_on_one_line
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 import numpy as np
 import pickle
+import random
 from tqdm import tqdm
 import torch
 import torchvision
@@ -85,25 +86,27 @@ class pickleData_2Darrays(Dataset):
         if (0.0 <= ratio_range[0] < ratio_range[1] <= 1.0) is False:
             raise AssertionError("pickleData_2Darrays(): invalid ratio_range") 
         data1, data2 = None, None
+        randGen = np.random.default_rng(rand_seed)
+        torch.manual_seed(rand_seed)
+        torch.cuda.manual_seed_all(rand_seed)
+        torch.backends.cudnn.deterministic = True
         with open(file_path1, 'rb') as inputFile:
-            data1 = pickle.load(inputFile) 
+            data1_ = pickle.load(inputFile)
+            idxShuffle = randGen.permutation(len(data1_))
+            idxShuffle = idxShuffle[int(ratio_range[0]*len(data1_)):int(ratio_range[1]*len(data1_))]
+            data1 = np.asarray([data1_[i] for i in idxShuffle], dtype=np.float32)
+            del data1_
         with open(file_path2, 'rb') as inputFile:
-            data2 = pickle.load(inputFile)
-        dataComb  = np.concatenate([data1, data2], axis=0)
-        labelComb = np.concatenate([[0]*len(data1), [1]*len(data2)])
-        
-        idxShuffle = np.arange(len(dataComb))
-        np.random.seed(rand_seed) 
-        np.random.shuffle(idxShuffle)
-        dataComb  = dataComb [idxShuffle]
-        labelComb = labelComb[idxShuffle]
-
-        idxStart = int(ratio_range[0]*len(dataComb))
-        idxEnd   = int(ratio_range[1]*len(dataComb))
-        self.data         = dataComb[ int(ratio_range[0]*len(dataComb)):int(ratio_range[1]*len(dataComb))]
-        self.labels       = labelComb[int(ratio_range[0]*len(dataComb)):int(ratio_range[1]*len(dataComb))]
+            data2_ = pickle.load(inputFile)
+            idxShuffle = randGen.permutation(len(data2_))
+            idxShuffle = idxShuffle[int(ratio_range[0]*len(data2_)):int(ratio_range[1]*len(data2_))]
+            data2 = np.asarray([data2_[i] for i in idxShuffle], dtype=np.float32)
+            del data2_
+        self.data         = np.concatenate([data1, data2], axis=0)
+        self.labels       = np.concatenate([[0]*len(data1), [1]*len(data2)])
         self.class_to_idx = {class_names[0]: 0, class_names[1]: 1}
         self.transform    = transform
+        del data1, data2
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
@@ -112,43 +115,63 @@ class pickleData_2Darrays(Dataset):
         if self.transform:
             img = self.transform(img)
         return img, label
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 class S2DataTransform:
-    def __init__(self, PMTstds, ampThres=0.01, is_training=True,
-                 amp_argm_level=0.1, gain_argm_level=0.01, width_argm_level=0.01, shift_argm_level=16):
+    def __init__(self, PMTstds, amp_thres=0.01, is_training=True,
+                 amp_aug_level=0.1, gain_aug_level=0.01, width_aug_level=0.01, shift_aug_level=16):
         self.PMTstds     = PMTstds
-        self.ampThres    = ampThres
+        self.amp_thres   = amp_thres
         self.is_training = is_training
-        self.amp_argm_level   = amp_argm_level
-        self.gain_argm_level  = gain_argm_level
-        self.width_argm_level = width_argm_level
-        self.shift_argm_level = shift_argm_level
+        self.amp_aug_level   = amp_aug_level
+        self.gain_aug_level  = gain_aug_level
+        self.width_aug_level = width_aug_level
+        self.shift_aug_level = shift_aug_level
         if not isinstance(self.PMTstds, torch.Tensor):
             self.PMTstds = torch.from_numpy(self.PMTstds).float().view(1, 1, -1)
     def __call__(self, img):
         if not isinstance(img, torch.Tensor):
             img = torch.from_numpy(img).float()
-        ### normalization
+        img = self._normalization(img)
+        img = self._amplitude_augmentation(img)
+        img = self._gain_augmentation(img)
+        img = self._time_shift_augmentation(img)
+        img = self._time_width_augmentation(img)
+        img = self._amplitude_limit(img)
+        return img
+    def _normalization(self, img):
         if img.ndim == 2:
             img = img.unsqueeze(0) # [1, time, PMT]
-        img[img < self.ampThres] = 0
+        thres_mask = (img >= self.amp_thres).float()
+        img = img*thres_mask
         img = torch.log1p(torch.clamp(img, min=0))
         img = img/(self.PMTstds + 1e-6)
-        ### argumentations
+        return img
+    def _amplitude_limit(self, img):
+        img = torch.clamp(img, 0, 10)
+        return img
+    def _amplitude_augmentation(self, img):
         if self.is_training is True:
-            ### argumentation: amp
-            amp_argm = torch.randn_like(img)*self.amp_argm_level*img
+            amp_aug = torch.randn_like(img)*self.amp_aug_level*img
             zero_mask = (img > 0).float()
-            img = img + amp_argm*zero_mask
-            ### argumentation: gain 
-            gain_argm = 1.0 + torch.randn(1).item()*self.gain_argm_level
-            img = img*gain_argm
-            ### argumentation: width
-            width_argm = 1.0 + torch.randn(1).item()*self.width_argm_level
-            width_argm = max(0.8, min(1.2, width_argm))
+            img = img + amp_aug*zero_mask
+        return img
+    def _gain_augmentation(self, img):
+        if self.is_training is True:
+            gain_aug = 1.0 + torch.randn(1).item()*self.gain_aug_level
+            img = img*gain_aug
+        return img
+    def _time_width_augmentation(self, img):
+        if self.is_training is True:
+            width_aug = 1.0 + torch.randn(1).item()*self.width_aug_level
+            width_aug = max(0.8, min(1.2, width_aug))
             width_orig = img.shape[1]
-            width_new  = int(width_argm*width_orig)
+            width_new  = int(width_aug*width_orig)
             img = img.unsqueeze(0) 
-            img = torch.nn.functional.interpolate(img, size=(width_new, img.shape[-1]), mode='bilinear', align_corners=False)
+            img = torch.nn.functional.interpolate(img, size=(width_new, img.shape[-1]), mode='bilinear', 
+                                                  align_corners=False)
             img = img.squeeze(0)
             if width_new > width_orig:
                 bin_start = (width_new - width_orig) // 2
@@ -157,18 +180,18 @@ class S2DataTransform:
                 pad_left  = (width_orig - width_new) // 2
                 pad_right = (width_orig - width_new) - pad_left
                 img = torch.nn.functional.pad(img, (0, 0, pad_left, pad_right))
-            ### argumentation: shift
-            shift_argm = np.random.randint(-self.shift_argm_level, self.shift_argm_level)
-            img = torch.roll(img, shifts=shift_argm, dims=1)
-        ### limit
-        img = torch.clamp(img, 0, 10)
+        return img
+    def _time_shift_augmentation(self, img):
+        if self.is_training is True:
+            shift_aug = torch.randint(-self.shift_aug_level, self.shift_aug_level, (1,)).item()
+            img = torch.roll(img, shifts=shift_aug, dims=1)
         return img
 ###############################################################################################################
 def main():
     verbosity  = 2
     randomSeed = 11
 
-    epochN     = 100
+    epochN     = 300
     batchSize  = 64
     learningRate  = 0.0005
 
@@ -201,8 +224,10 @@ def main():
     loaderArgs = {'batch_size': batchSize}
     if GPUNAME == 'cuda':
         loaderArgs = {'batch_size': batchSize, 'num_workers': 8, 'pin_memory': True}
-    trainLoader = torch.utils.data.DataLoader(dataset=trainData, shuffle=True,  **loaderArgs)
-    testLoader  = torch.utils.data.DataLoader(dataset=testData,  shuffle=False, **loaderArgs)
+    trainLoader = torch.utils.data.DataLoader(dataset=trainData, shuffle=True,  worker_init_fn=seed_worker,
+                                              **loaderArgs)
+    testLoader  = torch.utils.data.DataLoader(dataset=testData,  shuffle=False, worker_init_fn=seed_worker,
+                                              **loaderArgs)
     if verbosity >= 1:
         print('train_dataShape:', trainData[0][0].shape)
         print('test_dataShape :', testData[0][0].shape)
